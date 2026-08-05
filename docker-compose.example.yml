@@ -16,3 +16,6 @@ services:
       - TZ=Asia/Shanghai
       # 可选:覆盖 config.yaml 里的 server.token
       # - LITE_TOKEN=your-token
+    # TMDB 域名解析异常时(如 DNS 污染),可用 extra_hosts 固定解析:
+    # extra_hosts:
+    #   - "api.themoviedb.org:3.170.103.81"
