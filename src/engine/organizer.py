@@ -263,11 +263,13 @@ class TransferEngine:
         if dir_conf.category_folder:
             cat = None
             if media:
-                # 默认规则完全对齐 MoviePilot config/category.yaml
-                rules = dir_conf.category_rules or (
-                    DEFAULT_TV_RULES if media.media_type == "tv" else DEFAULT_MOVIE_RULES
-                )
-                cat = match_category(media, parse_rules(rules))
+                if dir_conf.category_rules:
+                    # 用户自定义规则:MP 格式 dict → 解析为有序规则
+                    rules = parse_rules(dir_conf.category_rules)
+                else:
+                    # 内置默认:已是解析好的规则列表(对齐 MoviePilot category.yaml)
+                    rules = DEFAULT_TV_RULES if media.media_type == "tv" else DEFAULT_MOVIE_RULES
+                cat = match_category(media, rules)
             return library_root / (cat or "未分类")
         return library_root
 
