@@ -59,6 +59,14 @@ def test_part_render():
     assert path == "Movie (2020)/Movie (2020)-Part1 - 1080p.x264.mkv", path
 
 
+
+def test_episode_only_defaults_season1():
+    """E01 命名无季号 → 默认 Season 1(对齐 MP season 属性 S01 兑底)。"""
+    meta = parse_filename("Show.2020.E01.1080p.mkv")
+    assert meta.begin_episode == 1 and meta.season is None
+    path = render_path(meta, None, TV_TPL, S0)
+    assert path == "Show (2020)/Season 1/Show - S01E01.mkv", path
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

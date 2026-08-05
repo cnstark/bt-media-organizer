@@ -34,6 +34,9 @@ def build_context(
     year = media.year if media and media.year else meta.year
     season = meta.season
     episode = meta.begin_episode
+    # 对齐 MoviePilot:确认是剧集但没有季号时(E01 命名)默认按第 1 季处理
+    if season is None and episode is not None:
+        season = 1
 
     # 第 0 季目录名:取别名
     season_dir = ""
