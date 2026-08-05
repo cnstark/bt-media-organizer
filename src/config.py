@@ -93,6 +93,8 @@ class TmdbConf:
     api_key: str = ""
     language: str = "zh-CN"
     timeout: int = 10
+    api_base: str = "https://api.themoviedb.org/3"  # 可换镜像/代理,如自建反代
+    proxy: str = ""  # 如 http://127.0.0.1:7890,留空则不设(仍会读系统 HTTPS_PROXY)
 
 
 @dataclass

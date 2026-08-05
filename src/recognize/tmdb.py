@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import Optional
 
@@ -15,6 +16,9 @@ from ..history import HistoryStore
 from ..parse.filename import ParsedMeta
 
 logger = logging.getLogger("lite-organizer.tmdb")
+
+# 是否包含 CJK 字符(判断标题是否为中文)
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
 # 电影类别(中文归类,用于配置 category 场景,可自行扩展)
 _MOVIE_CATEGORY_MAP = {
@@ -42,6 +46,17 @@ class MediaInfo:
     category: Optional[str] = None  # 类别(如"科幻")
     overview: str = ""
 
+    def to_dict(self) -> dict:
+        return {
+            "title": self.title,
+            "original_title": self.original_title,
+            "year": self.year,
+            "media_type": self.media_type,
+            "tmdb_id": self.tmdb_id,
+            "category": self.category,
+            "overview": self.overview,
+        }
+
 
 class TmdbRecognizer:
     """TMDB 识别器;enabled=False 时 recognize() 直接返回 None。"""
@@ -51,8 +66,8 @@ class TmdbRecognizer:
         self.store = store
         self._client = None
         if conf.enabled:
-            self._client = httpx.Client(timeout=conf.timeout)
-            logger.info("TMDB 识别已启用")
+            self._client = httpx.Client(timeout=conf.timeout, proxy=conf.proxy or None)
+            logger.info(f"TMDB 识别已启用,API: {conf.api_base},语言: {conf.language}")
 
     def close(self):
         if self._client:
@@ -69,7 +84,8 @@ class TmdbRecognizer:
         if not meta.title:
             return None
         media_type = "tv" if meta.is_tv else "movie"
-        key = f"{media_type}|{meta.title}|{meta.year or ''}"
+        # 缓存键含语言,避免切换语言后命中旧结果
+        key = f"{media_type}|{self.conf.language}|{meta.title}|{meta.year or ''}"
 
         cached = self.store.cache_get(key)
         if cached is not None:
@@ -78,6 +94,8 @@ class TmdbRecognizer:
         result = self._search(media_type, meta.title, meta.year)
         if result:
             self.store.cache_set(key, result.to_dict())
+            logger.info(f"TMDB 识别: {meta.title} -> {result.title} ({result.year})"
+                        f"[id={result.tmdb_id} {result.media_type}]")
         else:
             # 缓存 None 结果(30 天),避免反复请求未命中
             self.store.cache_set(key, {})
@@ -85,24 +103,25 @@ class TmdbRecognizer:
 
     # ---------------- 私有 ----------------
 
-    def _search(self, media_type: str, title: str, year: Optional[int]) -> Optional[MediaInfo]:
+    def _get(self, path: str, **params) -> Optional[dict | list]:
+        """请求 TMDB,失败返回 None 并记日志(网络不通时明确可见)。"""
         try:
             resp = self._client.get(
-                f"https://api.themoviedb.org/3/search/{media_type}",
-                params={
-                    "api_key": self.conf.api_key,
-                    "query": title,
-                    "language": self.conf.language,
-                    "year": year or "",
-                    "include_adult": "false",
-                },
+                f"{self.conf.api_base.rstrip('/')}{path}",
+                params={"api_key": self.conf.api_key, "language": self.conf.language, **params},
             )
             resp.raise_for_status()
-            results = (resp.json() or {}).get("results") or []
-        except (httpx.HTTPError, ValueError) as e:
-            logger.warning(f"TMDB 搜索失败 [{title}]: {e}")
+            return resp.json()
+        except httpx.HTTPError as e:
+            logger.warning(f"TMDB 请求失败 {path}: {e}(检查网络/镜像/api_base)")
+            return None
+        except ValueError as e:
+            logger.warning(f"TMDB 响应解析失败 {path}: {e}")
             return None
 
+    def _search(self, media_type: str, title: str, year: Optional[int]) -> Optional[MediaInfo]:
+        data = self._get(f"/search/{media_type}", query=title, year=year or "", include_adult="false")
+        results = (data or {}).get("results") or []
         if not results:
             return None
 
@@ -110,15 +129,37 @@ class TmdbRecognizer:
         if best is None:
             return None
 
+        # 语言为中文时,优先取本地化标题(translations 兜底)
+        name = best.get("name") or best.get("title") or title
+        if self.conf.language.lower().startswith("zh") and not _CJK_RE.search(name):
+            localized = self._localized_title(media_type, best.get("id"))
+            if localized:
+                name = localized
+
         return MediaInfo(
-            title=best.get("name") or best.get("title") or title,
+            title=name,
             original_title=best.get("original_name") or best.get("original_title") or "",
             year=_extract_year(best),
             media_type=media_type,
             tmdb_id=best.get("id"),
-            category=_category_of(media_type, best.get("genre_ids") or []),
+            category=self._category_of(media_type, best.get("genre_ids") or []),
             overview=best.get("overview") or "",
         )
+
+    def _localized_title(self, media_type: str, tmdb_id) -> Optional[str]:
+        """从 translations 接口取中文标题(zh-CN 优先,zh-TW 兜底)。"""
+        if not tmdb_id:
+            return None
+        data = self._get(f"/{media_type}/{tmdb_id}/translations")
+        translations = (data or {}).get("translations") or []
+        for iso in ("zh-CN", "zh-TW", "zh"):
+            for t in translations:
+                if (t.get("iso_639_1") + "-" + (t.get("iso_3166_1") or "")) == iso \
+                        or (iso == "zh" and t.get("iso_639_1") == "zh"):
+                    name = ((t.get("data") or {}).get("name") or (t.get("data") or {}).get("title") or "").strip()
+                    if name:
+                        return name
+        return None
 
     @staticmethod
     def _pick_best(results: list, title: str, year: Optional[int]):

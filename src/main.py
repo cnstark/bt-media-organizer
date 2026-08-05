@@ -24,6 +24,39 @@ from .log import setup_logger
 logger = logging.getLogger("lite-organizer")
 
 
+def _apply_uid_gid() -> None:
+    """
+    按环境变量 PUID/PGID 降权运行(参照 MoviePilot)。
+    - 值 <= 0 或未设置:保持当前用户(容器默认 root)
+    - 非 root 启动:跳过(无权限切换)
+    """
+    import grp  # noqa: PLC0415
+    import os as _os  # noqa: PLC0415
+    import pwd  # noqa: PLC0415
+
+    if _os.geteuid() != 0:
+        logger.info(f"非 root 启动,跳过 PUID/PGID 切换(当前 uid={_os.geteuid()})")
+        return
+    try:
+        puid = int(_os.getenv("PUID", "0") or "0")
+        pgid = int(_os.getenv("PGID", "0") or "0")
+    except ValueError:
+        logger.warning("PUID/PGID 非数字,忽略")
+        return
+    if puid <= 0 and pgid <= 0:
+        logger.info("PUID/PGID 为 0,以 root 运行")
+        return
+    try:
+        if pgid > 0:
+            _os.setgid(pgid)
+        if puid > 0:
+            _os.setuid(puid)
+        user = pwd.getpwuid(puid).pw_name if puid > 0 else "root"
+        logger.info(f"已切换运行用户: {user} (uid={puid}, gid={pgid})")
+    except (PermissionError, KeyError, OSError) as e:
+        logger.warning(f"PUID/PGID 切换失败,继续以当前用户运行: {e}")
+
+
 def _poll_loop(engine: TransferEngine, downloader: str, interval: int, stop: threading.Event):
     """下载器轮询线程:对账「已完成未打标签」的任务。"""
     logger.info(f"轮询线程已启动: {downloader} 每 {interval}s")
@@ -50,6 +83,7 @@ def main() -> None:
 
     setup_logger(conf.log)
     logger.info("lite-organizer 启动中 ...")
+    _apply_uid_gid()
 
     # 存储 + 引擎
     store = HistoryStore(conf.history.db, conf.history.keep_days)

@@ -56,8 +56,10 @@ recognize:
   tmdb:
     enabled: false              # 需要 TMDB API key 才启用
     api_key: ""
-    language: "zh-CN"
+    language: "zh-CN"          # 标题语言(zh-CN 优先中文译名)
     timeout: 10                 # 秒
+    api_base: "https://api.themoviedb.org/3"  # 默认官方;网络不通可换镜像/自建反代
+    proxy: ""                   # 如 http://192.168.1.1:7890,留空则读系统 HTTPS_PROXY
 
 history:
   db: "./data/organizer.db"     # SQLite 路径
