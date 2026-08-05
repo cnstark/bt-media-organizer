@@ -55,7 +55,6 @@ def build_context(
         "year": year,
         "media_type": media.media_type if media else ("tv" if meta.is_tv else "movie"),
         "tmdb_id": media.tmdb_id if media else None,
-        "category": (media.category if media else None) or "",
         # 季集
         "season": season,
         "season_dir": season_dir,
