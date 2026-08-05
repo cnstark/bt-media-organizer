@@ -16,7 +16,7 @@ from ..config import Config, TransferDirConf
 from ..downloaders import DownloaderAdapter, QBittorrentAdapter, TorrentInfo, WebhookEvent
 from ..history import HistoryStore
 from ..parse.filename import parse_filename, subtitle_lang_tag
-from ..recognize.tmdb import MediaInfo, TmdbRecognizer
+from ..recognize.tmdb import DEFAULT_REGION_CATEGORIES, MediaInfo, TmdbRecognizer, region_category
 from ..storage import local
 from . import executor
 from .namer import render_path
@@ -144,16 +144,14 @@ class TransferEngine:
         if not items:
             return OrganizeResult(message=f"没有符合 {dir_conf.media_type} 类型的文件")
 
-        # 4. 识别 + 目标路径计算
-        dest_root = Path(dir_conf.library_path)
-        if dir_conf.category:
-            dest_root = dest_root / dir_conf.category
+        # 4. 识别 + 目标路径计算(类别目录按每个主视频的识别结果计算)
+        library_root = Path(dir_conf.library_path)
         self._main_dest_cache = {}
 
         planned: List[dict] = []   # {item, dest, transfer_type, overwrite}
         skipped = 0
         for item in items:
-            dest = self._build_dest(item, dest_root, dir_conf)
+            dest = self._build_dest(item, library_root, dir_conf)
             if dest is None:
                 skipped += 1
                 continue
@@ -228,7 +226,7 @@ class TransferEngine:
             return is_tv
         return not is_tv
 
-    def _build_dest(self, item: PlanItem, dest_root: Path,
+    def _build_dest(self, item: PlanItem, library_root: Path,
                     dir_conf: TransferDirConf) -> Optional[Path]:
         """计算单个文件的目标路径。"""
         if item.is_extra:
@@ -236,26 +234,43 @@ class TransferEngine:
             if related:
                 related_dest = self._main_dest_cache.get(id(related))
                 if related_dest is None:
-                    related_dest = self._build_main_dest(related, dest_root, dir_conf)
+                    related_dest = self._build_main_dest(related, library_root, dir_conf)
                     if related_dest is not None:
                         self._main_dest_cache[id(related)] = related_dest
                 if related_dest is None:
                     return None
                 if not dir_conf.renaming:
-                    return dest_root / item.source.name
+                    return library_root / item.source.name
                 lang = ""
                 if item.kind == "subtitle" and self.conf.engine.rename.subtitle_lang_tag:
                     lang = subtitle_lang_tag(item.source.name)
                 return related_dest.parent / f"{related_dest.stem}{lang}{item.source.suffix.lower()}"
-            # 孤儿附加文件:独立解析后按模板渲染
+            # 孤儿附加文件:独立解析后按模板渲染(未识别类别归"未分类")
             meta = item.meta or parse_filename(item.source.name)
             if not meta.title:
                 return None
-            return self._render_main(meta, None, dest_root, dir_conf, item.source.name)
+            root = self._category_root(library_root, dir_conf, None)
+            return self._render_main(meta, None, root, dir_conf, item.source.name)
 
-        return self._build_main_dest(item, dest_root, dir_conf)
+        return self._build_main_dest(item, library_root, dir_conf)
 
-    def _build_main_dest(self, item: PlanItem, dest_root: Path,
+    def _category_root(self, library_root: Path, dir_conf: TransferDirConf,
+                       media: Optional[MediaInfo]) -> Path:
+        """计算类别根目录:固定 category 优先;其次按识别类别自动建目录。"""
+        if dir_conf.category:
+            return library_root / dir_conf.category
+        if dir_conf.category_folder:
+            cat = None
+            if media:
+                if dir_conf.category_by == "region":
+                    rules = dir_conf.region_categories or DEFAULT_REGION_CATEGORIES
+                    cat = region_category(media.origin_country, rules)
+                else:
+                    cat = media.category
+            return library_root / (cat or "未分类")
+        return library_root
+
+    def _build_main_dest(self, item: PlanItem, library_root: Path,
                          dir_conf: TransferDirConf) -> Optional[Path]:
         meta = item.meta
         media = self.recognizer.recognize(meta) if meta else None
@@ -263,7 +278,8 @@ class TransferEngine:
         if dir_conf.media_type in ("movie", "tv") and media and media.media_type:
             if dir_conf.media_type != media.media_type:
                 return None
-        return self._render_main(meta, media, dest_root, dir_conf, item.source.name)
+        root = self._category_root(library_root, dir_conf, media)
+        return self._render_main(meta, media, root, dir_conf, item.source.name)
 
     def _render_main(self, meta, media, dest_root: Path, dir_conf: TransferDirConf,
                      source_name: str) -> Path:

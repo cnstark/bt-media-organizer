@@ -6,8 +6,8 @@ from __future__ import annotations
 
 import logging
 import re
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import List, Optional
 
 import httpx
 
@@ -33,6 +33,27 @@ _TV_CATEGORY_MAP = {
     10764: "真人秀", 10766: "肥皂剧", 10767: "脱口秀", 10768: "战争政治", 37: "西部",
 }
 
+# 默认地区分类规则(按顺序匹配,命中即止;可用配置 region_categories 覆盖)
+DEFAULT_REGION_CATEGORIES = {
+    "欧美剧": ["US", "GB", "FR", "DE", "IT", "ES", "PT", "NL", "BE", "AT", "CH",
+              "SE", "NO", "DK", "FI", "IE", "PL", "CZ", "GR", "CA", "AU", "NZ", "RU"],
+    "国产剧": ["CN"],
+    "港台剧": ["HK", "TW"],
+    "日韩剧": ["JP", "KR"],
+    "亚洲剧": ["TH", "SG", "MY", "IN", "ID", "PH", "VN", "TR"],
+}
+
+
+def region_category(origin_country: list, rules: dict) -> Optional[str]:
+    """按出品国家/地区匹配分类(如 欧美剧/国产剧)。未命中返回 None。"""
+    if not origin_country:
+        return None
+    countries = {c.upper() for c in origin_country}
+    for name, codes in (rules or {}).items():
+        if countries & {c.upper() for c in codes}:
+            return name
+    return None
+
 
 @dataclass
 class MediaInfo:
@@ -43,7 +64,8 @@ class MediaInfo:
     year: Optional[int] = None
     media_type: str = ""          # movie / tv
     tmdb_id: Optional[int] = None
-    category: Optional[str] = None  # 类别(如"科幻")
+    category: Optional[str] = None  # 类型类别(如"科幻")
+    origin_country: List[str] = field(default_factory=list)  # 出品国家/地区(剧集)
     overview: str = ""
 
     def to_dict(self) -> dict:
@@ -54,6 +76,7 @@ class MediaInfo:
             "media_type": self.media_type,
             "tmdb_id": self.tmdb_id,
             "category": self.category,
+            "origin_country": self.origin_country,
             "overview": self.overview,
         }
 
@@ -143,6 +166,7 @@ class TmdbRecognizer:
             media_type=media_type,
             tmdb_id=best.get("id"),
             category=self._category_of(media_type, best.get("genre_ids") or []),
+            origin_country=list(best.get("origin_country") or []),
             overview=best.get("overview") or "",
         )
 

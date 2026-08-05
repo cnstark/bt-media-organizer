@@ -40,6 +40,10 @@ directories:                    # 下载目录 → 媒体库映射,按顺序匹�
     library_path: "/data/media"
     transfer_type: hardlink
     media_type: tv
+    category: ~                 # 固定类别子目录(如 "华语"),留空不建
+    category_folder: false      # true = 按识别类别自动建子目录,未识别归"未分类"
+    category_by: genre          # genre=按类型(剧情/科幻);region=按地区(欧美剧/国产剧/日韩剧...)
+    region_categories: {}       # region 模式的自定义规则(如: 欧美剧: [US, GB]),留空用内置默认
     monitor: true
 
 downloaders:                    # 目前仅支持 qbittorrent
