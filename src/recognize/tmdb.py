@@ -85,7 +85,7 @@ class TmdbRecognizer:
         if cached is not None:
             return MediaInfo(**cached) if cached else None
 
-        result = self._search(media_type, meta.title, meta.year)
+        result = self._search(media_type, meta)
         if result:
             self.store.cache_set(key, result.to_dict())
             logger.info(f"TMDB 识别: {meta.title} -> {result.title} ({result.year})"
@@ -113,13 +113,28 @@ class TmdbRecognizer:
             logger.warning(f"TMDB 响应解析失败 {path}: {e}")
             return None
 
-    def _search(self, media_type: str, title: str, year: Optional[int]) -> Optional[MediaInfo]:
-        data = self._get(f"/search/{media_type}", query=title, year=year or "", include_adult="false")
-        results = (data or {}).get("results") or []
+    def _search(self, media_type: str, meta: ParsedMeta) -> Optional[MediaInfo]:
+        title = meta.title
+        # 查询变体:完整标题优先;含中文时附加纯英文标题兜底
+        # (如 [频道名 中文剧名].A.Bite.of.China.2025 → 用 "A Bite of China" 搜索)
+        queries = [title]
+        latin = _latin_title(meta.tokens)
+        if latin and latin.lower() != title.lower():
+            queries.append(latin)
+
+        results = None
+        used_query = None
+        for q in queries:
+            data = self._get(f"/search/{media_type}", query=q, year=meta.year or "", include_adult="false")
+            rs = (data or {}).get("results") or []
+            if rs:
+                results = rs
+                used_query = q
+                break
         if not results:
             return None
 
-        best = self._pick_best(results, title, year)
+        best = self._pick_best(results, title, used_query, meta.year)
         if best is None:
             return None
 
@@ -159,16 +174,44 @@ class TmdbRecognizer:
         return None
 
     @staticmethod
-    def _pick_best(results: list, title: str, year: Optional[int]):
-        """优先精确年份匹配,其次标题完全一致(忽略大小写)。"""
+    def _pick_best(results: list, title: str, query: str, year: Optional[int]):
+        """打分选优:年份命中 +2,标题/原名精确命中 +2,查询词覆盖数加权。"""
         t = title.strip().lower()
-        exact_year = [r for r in results if year and _extract_year(r) == year]
-        candidates = exact_year or results
-        for r in candidates:
-            name = (r.get("name") or r.get("title") or "").strip().lower()
-            if name == t:
-                return r
-        return candidates[0]
+        q_words = {w for w in re.split(r"[^a-z0-9]+", (query or t).lower()) if w}
+        best_r, best_score = None, -1
+        for r in results:
+            score = 0
+            if year and _extract_year(r) == year:
+                score += 2
+            for name_field in ("name", "title", "original_name", "original_title"):
+                name = (r.get(name_field) or "").strip().lower()
+                if name and name == t:
+                    score += 2
+                    break
+            if q_words:
+                r_words = set()
+                for name_field in ("name", "title", "original_name", "original_title"):
+                    r_words |= {w for w in re.split(r"[^a-z0-9]+", (r.get(name_field) or "").lower()) if w}
+                score += len(q_words & r_words) / max(len(q_words), 1)
+            if score > best_score:
+                best_score, best_r = score, r
+        return best_r
+
+
+# 纯英文标题兜底查询时的停用词(频道/介质类)
+_LATIN_STOPWORDS = {"cctv", "hd", "tv", "uhd", "web", "dl", "hdtv", "uhdtv", "rip"}
+
+
+def _latin_title(tokens: List[str]) -> Optional[str]:
+    """从标题 token 中提取纯英文短语(如 'A Bite of China'),用于兜底搜索。"""
+    words = []
+    for t in tokens:
+        if not re.fullmatch(r"[A-Za-z]+", t):
+            continue
+        if t.lower() in _LATIN_STOPWORDS:
+            continue
+        words.append(t)
+    return " ".join(words) if words else None
 
 
 def _extract_year(item: dict) -> Optional[int]:

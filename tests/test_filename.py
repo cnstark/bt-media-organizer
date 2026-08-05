@@ -111,6 +111,26 @@ def test_orphan_extra_meta():
     assert m.year == 2026
 
 
+
+def test_cn_numeral_season_episode():
+    m = parse_filename("某剧.第四季.第5集.1080p.mkv")
+    assert m.season == 4, m.season
+    assert m.begin_episode == 5
+    m2 = parse_filename("某剧.第十二季.第二十一集.1080p.mkv")
+    assert m2.season == 12
+    assert m2.begin_episode == 21
+
+
+def test_channel_prefix_noise_cleaned():
+    m = parse_filename("[中央广播电视总台4K超高清频道 舌尖上的中国 第四季].CCTV-4K.A.Bite.of.China.2025.S04.2160p.50fps.UHDTV.HEVC.10bit.HLG.DD5.1-QHstudIo.ts")
+    assert m.season == 4
+    assert m.year == 2025
+    assert m.source == "UHDTV"
+    assert m.video_codec == "hevc"
+    assert "fps" not in m.title.lower() and "hlg" not in m.title.lower()
+    assert "第四季" not in m.title
+    assert m.group == "QHstudIo"
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

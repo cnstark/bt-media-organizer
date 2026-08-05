@@ -106,6 +106,51 @@ def test_cache_key_contains_language():
     store.close()
 
 
+
+class _RoutingClient:
+    """按查询词路由:CJK 查询返回空,英文查询返回结果。"""
+
+    def __init__(self, zh_results, en_results):
+        self._zh, self._en = zh_results, en_results
+        self.calls = []
+
+    def get(self, url, params=None):
+        self.calls.append((url, params or {}))
+        payload = self._en if params.get("query") and not _HAS_CJK.search(params["query"]) else self._zh
+        class _R:
+            def raise_for_status(self): pass
+            def json(self): return {"results": payload}
+        return _R()
+
+    def close(self):
+        pass
+
+
+import re as _re
+_HAS_CJK = _re.compile(r"[\u4e00-\u9fff]")
+
+_EN_RESULT = [{
+    "id": 60781, "name": "舌尖上的中国", "original_name": "A Bite of China",
+    "first_air_date": "2012-05-14", "genre_ids": [99], "origin_country": ["CN"],
+    "original_language": "zh",
+}]
+
+
+def test_latin_fallback_query():
+    """中文+英文混合标题:中文查询无结果时用纯英文标题兜底搜索。"""
+    rec, store = _recognizer(_RoutingClient([], _EN_RESULT))
+    meta = ParsedMeta(title="中央广播电视总台4K超高清频道 舌尖上的中国 CCTV-4K A Bite of China",
+                      year=2025, season=4,
+                      tokens=["中央广播电视总台4K超高清频道", "舌尖上的中国", "CCTV-4K", "A", "Bite", "of", "China"])
+    m = rec.recognize(meta)
+    assert m is not None
+    assert m.title == "舌尖上的中国", m.title
+    assert m.tmdb_id == 60781
+    # 第二次查询应包含英文标题
+    queries = [params.get("query") for _, params in rec._client.calls]
+    assert any("A Bite of China" in q for q in queries), queries
+    store.close()
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

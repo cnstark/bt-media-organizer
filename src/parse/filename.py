@@ -11,12 +11,13 @@ from typing import List, Optional
 # 年份:独立成词,如 (2026) / .2026. / 2026
 _YEAR_RE = re.compile(r"(?:^|[.\[(\s-])(19\d{2}|20\d{2})(?:$|[.\])\s-])")
 # 季:Season 1 / S01 / 第2季(英文 S 后必须是数字边界,避免 S01E02 里重复匹配)
-_SEASON_RE = re.compile(r"[Ss]eason[\s._-]*(\d{1,2})|(?:^|[.\s_-])S(\d{1,2})(?!\d)|第\s*(\d{1,3})\s*季")
+_SEASON_RE = re.compile(r"[Ss]eason[\s._-]*(\d{1,2})|(?:^|[.\s_-])S(\d{1,2})(?!\d)|第\s*(\d{1,3})\s*季|第\s*([零一二两三四五六七八九十百]+)\s*季")
 # 集:S01E02 / S01E02-E03 / E02 / EP02 / 第2集
 _EPISODE_RE = re.compile(
     r"(?:^|[.\s_-])S\d{1,2}E(\d{1,3})(?:-?E?(\d{1,3}))?"
     r"|(?:^|[.\s_-])EP?0*(\d{1,3})(?!\d)"
     r"|第\s*(\d{1,3})\s*[集话]"
+    r"|第\s*([零一二两三四五六七八九十]+)\s*[集话]"
 )
 # 分辨率
 _RES_RE = re.compile(r"\b(2160p|1080p|720p|480p|4k|uhd)\b", re.I)
@@ -24,11 +25,11 @@ _RES_RE = re.compile(r"\b(2160p|1080p|720p|480p|4k|uhd)\b", re.I)
 _VIDEO_RE = re.compile(r"\b(x264|h264|avc|hevc|x265|h265|mpeg4|mpeg2|vc-?1)\b", re.I)
 # 音频编码
 _AUDIO_RE = re.compile(
-    r"\b(truehd|atmos|dts-?hd(?:ma)?|dts|ac3|eac3|aac|flac|pcm|lpcm|ddp5\.1|dd5\.1|5\.1|7\.1)\b", re.I
+    r"\b(truehd|atmos|dts-?hd(?:ma)?|dts|ac3|eac3|aac|flac|pcm|lpcm|dd5|ddp5\.1|dd5\.1|5\.1|7\.1)\b", re.I
 )
 # 来源
 _SOURCE_RE = re.compile(
-    r"\b(blu-?ray|remux|web-?dl|webrip|hdtv|dvdrip|bdrip|bdiso|uhdbluray|h265)\b", re.I
+    r"\b(blu-?ray|remux|web-?dl|webrip|hdtv|uhdtv|dvdrip|bdrip|bdiso|uhdbluray|h265)\b", re.I
 )
 # Part/CD/Disc
 _PART_RE = re.compile(r"(?:^|[.\s_-])(part|pt|cd|disc|disk)[.\s_-]?(\d{1,2})(?:$|[.\s_-])", re.I)
@@ -41,7 +42,7 @@ _PART_LIKE_RE = re.compile(r"(?i)(part|pt|cd|disc|disk)\d*$")
 # 末尾 Part/CD/Disc:如 x264-PART1 / Movie.CD1 / Movie.Disc 1
 _PART_TAIL_RE = re.compile(r"[.\s_-]((?:part|pt|cd|disc|disk)[.\s_-]?)(\d{1,2})$", re.I)
 # 噪声词(版本/画质说明,不进入标题)
-_NOISE_RE = re.compile(r"\b(dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi)\b", re.I)
+_NOISE_RE = re.compile(r"\b(dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi|hlg)\b|\b\d{2,3}fps\b", re.I)
 # 季/集单词(单独成 token 时丢弃)
 _SE_EXTRA_WORDS = {"season", "ep", "episode", "episodes", "e", "s", "集", "季", "话"}
 # 内嵌 tmdbid 等媒体 ID:{tmdbid=12345} / {mediaid=123}
@@ -159,11 +160,37 @@ def _find_year(text: str) -> Optional[int]:
     return years[-1] if years else None
 
 
+_CN_NUM = {"零": 0, "一": 1, "二": 2, "两": 2, "三": 3, "四": 4, "五": 5,
+             "六": 6, "七": 7, "八": 8, "九": 9, "十": 10}
+
+
+def _cn_to_int(text: str) -> Optional[int]:
+    """中文数字转整数,支持 一~九十九(如 四→4, 十二→12, 二十一→21)。"""
+    if not text or any(c not in _CN_NUM for c in text):
+        return None
+    if text == "十":
+        return 10
+    if "十" in text:
+        a, _, b = text.partition("十")
+        tens = _CN_NUM[a] if a else 1
+        ones = _CN_NUM[b] if b else 0
+        return tens * 10 + ones
+    return _CN_NUM[text]
+
+
 def _find_season(text: str) -> Optional[int]:
     m = _SEASON_RE.search(text)
     if not m:
         return None
-    return int(next(g for g in m.groups() if g is not None))
+    for g in m.groups():
+        if g is None:
+            continue
+        if g.isdigit():
+            return int(g)
+        cn = _cn_to_int(g)
+        if cn is not None:
+            return cn
+    return None
 
 
 def _find_episodes(text: str) -> tuple[Optional[int], Optional[int]]:
@@ -171,8 +198,10 @@ def _find_episodes(text: str) -> tuple[Optional[int], Optional[int]]:
     if not m:
         return None, None
     groups = [g for g in m.groups() if g is not None]
-    begin = int(groups[0])
-    end = int(groups[1]) if len(groups) > 1 else None
+    begin = int(groups[0]) if groups[0].isdigit() else _cn_to_int(groups[0])
+    end = None
+    if len(groups) > 1:
+        end = int(groups[1]) if groups[1].isdigit() else _cn_to_int(groups[1])
     return begin, end
 
 
