@@ -1,0 +1,18 @@
+services:
+  lite-organizer:
+    build: .
+    container_name: lite-organizer
+    restart: unless-stopped
+    ports:
+      - "8900:8900"
+    volumes:
+      # 配置与数据
+      - ./config.yaml:/config/config.yaml:ro
+      - ./data:/data
+      # 下载目录与媒体库(示例,按实际路径修改)
+      - /path/to/downloads:/data/downloads
+      - /path/to/media:/data/media
+    environment:
+      - TZ=Asia/Shanghai
+      # 可选:覆盖 config.yaml 里的 server.token
+      # - LITE_TOKEN=your-token

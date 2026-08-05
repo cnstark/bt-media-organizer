@@ -1,0 +1,68 @@
+# lite-organizer 配置文件示例
+# 复制为 config.yaml 后按需修改;支持环境变量覆盖(见 README)
+
+server:
+  host: "0.0.0.0"
+  port: 8900
+  token: "change-me"            # API/webhook 鉴权,请务必修改
+
+engine:
+  threads: 2                    # 单次整理内文件并发数
+  rename:
+    movie: "{{title}}{% if year %} ({{year}}){% endif %}/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if quality %} - {{quality}}{% endif %}{{ext}}"
+    tv: "{{title}}{% if year %} ({{year}}){% endif %}/{{season_dir}}/{{title}} - {{season_episode}}{% if part %}-{{part}}{% endif %}{{ext}}"
+    s0_alias: ["Specials", "SPs"]   # 第 0 季目录名(取第一个)
+    subtitle_lang_tag: true     # 字幕文件追加语言标记
+  default_overwrite: never      # never / always / size / latest
+  min_filesize: 0               # MB,0=不限制
+  exclude_words: []             # 全局整理屏蔽词(路径命中即跳过)
+  media_exts: [".mkv", ".mp4", ".ts", ".iso", ".avi", ".wmv", ".rmvb", ".mov", ".m2ts"]
+  subtitle_exts: [".srt", ".ass", ".ssa", ".sub", ".idx"]
+  audio_exts: [".mka", ".flac", ".aac", ".dts", ".ac3", ".wav", ".eac3"]
+  tmp_exts: [".part", ".download", ".!qb", ".torrent"]   # 下载中/临时后缀
+  delete_empty_source_dirs: true  # move 模式下整理完清理源空目录
+
+directories:                    # 下载目录 → 媒体库映射,按顺序匹配,命中即止
+  - name: "电影下载"
+    download_path: "/data/downloads/movies"
+    library_path: "/data/media"
+    transfer_type: hardlink     # move / copy / hardlink / softlink
+    media_type: movie           # movie / tv / all
+    category: ~                 # 固定类别子目录(如 "华语"),留空不建
+    renaming: true              # false = 保持原文件名直接转移
+    monitor: true               # 参与事件/轮询匹配
+    overwrite_mode: ~           # 留空继承 engine.default_overwrite
+    min_filesize: ~             # 留空继承 engine.min_filesize
+    exclude_words: []           # 目录级屏蔽词,与全局合并
+
+  - name: "剧集下载"
+    download_path: "/data/downloads/tv"
+    library_path: "/data/media"
+    transfer_type: hardlink
+    media_type: tv
+    monitor: true
+
+downloaders:                    # 目前仅支持 qbittorrent
+  - name: qb
+    type: qbittorrent
+    url: "http://127.0.0.1:8080"
+    username: "admin"
+    password: "adminadmin"
+    poll_interval: 60           # 秒;0 = 关闭轮询
+    tag: "已整理"               # 整理完成标签(对账依据)
+    webhook: true               # 启用 webhook 入口
+
+recognize:
+  tmdb:
+    enabled: false              # 需要 TMDB API key 才启用
+    api_key: ""
+    language: "zh-CN"
+    timeout: 10                 # 秒
+
+history:
+  db: "./data/organizer.db"     # SQLite 路径
+  keep_days: 365                # 历史保留天数,0=永久
+
+log:
+  level: info                   # debug / info / warning / error
+  file: "./data/organizer.log"  # 空 = 仅 stdout
