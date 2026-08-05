@@ -16,7 +16,8 @@ from ..config import Config, TransferDirConf
 from ..downloaders import DownloaderAdapter, QBittorrentAdapter, TorrentInfo, WebhookEvent
 from ..history import HistoryStore
 from ..parse.filename import parse_filename, subtitle_lang_tag
-from ..recognize.tmdb import DEFAULT_REGION_CATEGORIES, MediaInfo, TmdbRecognizer, region_category
+from ..recognize.category import DEFAULT_MOVIE_RULES, DEFAULT_TV_RULES, match_category, parse_rules
+from ..recognize.tmdb import MediaInfo, TmdbRecognizer
 from ..storage import local
 from . import executor
 from .namer import render_path
@@ -262,11 +263,11 @@ class TransferEngine:
         if dir_conf.category_folder:
             cat = None
             if media:
-                if dir_conf.category_by == "region":
-                    rules = dir_conf.region_categories or DEFAULT_REGION_CATEGORIES
-                    cat = region_category(media.origin_country, rules)
-                else:
-                    cat = media.category
+                # 默认规则完全对齐 MoviePilot config/category.yaml
+                rules = dir_conf.category_rules or (
+                    DEFAULT_TV_RULES if media.media_type == "tv" else DEFAULT_MOVIE_RULES
+                )
+                cat = match_category(media, parse_rules(rules))
             return library_root / (cat or "未分类")
         return library_root
 

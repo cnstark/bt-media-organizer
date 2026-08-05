@@ -69,8 +69,7 @@ class TransferDirConf:
     media_type: str = "all"          # movie / tv / all
     category: Optional[str] = None   # 固定类别子目录(如"华语");留空不建
     category_folder: bool = False    # 按识别类别自动建子目录(未识别归"未分类")
-    category_by: str = "genre"      # genre=按类型(剧情/科幻);region=按地区(欧美剧/国产剧)
-    region_categories: dict = field(default_factory=dict)  # 地区规则(覆盖内置默认)
+    category_rules: dict = field(default_factory=dict)  # MP 格式类别规则,留空用内置 MP 默认
     renaming: bool = True
     monitor: bool = True
     overwrite_mode: Optional[str] = None

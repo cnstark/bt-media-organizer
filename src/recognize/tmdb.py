@@ -1,6 +1,7 @@
 """TMDB 媒体识别(可选增强,失败回退文件名解析结果)。
 
-识别流程:按标题+年份搜索 movie/tv → 取最佳匹配 → 缓存(SQLite)。
+识别流程:按标题+年份搜索 movie/tv → 取最佳匹配 → 中文标题增强
+(translations 兜底)→ 缓存(SQLite,键含语言)。
 """
 from __future__ import annotations
 
@@ -20,52 +21,20 @@ logger = logging.getLogger("lite-organizer.tmdb")
 # 是否包含 CJK 字符(判断标题是否为中文)
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 
-# 电影类别(中文归类,用于配置 category 场景,可自行扩展)
-_MOVIE_CATEGORY_MAP = {
-    28: "动作", 12: "冒险", 16: "动画", 35: "喜剧", 80: "犯罪",
-    18: "剧情", 10751: "家庭", 14: "奇幻", 36: "历史", 27: "恐怖",
-    10402: "音乐", 9648: "悬疑", 10749: "爱情", 878: "科幻",
-    10770: "电视电影", 53: "惊悚", 10752: "战争", 37: "西部",
-}
-_TV_CATEGORY_MAP = {
-    10759: "动作冒险", 16: "动画", 35: "喜剧", 80: "犯罪", 99: "纪录",
-    18: "剧情", 10751: "家庭", 10762: "儿童", 9648: "悬疑", 10765: "科幻奇幻",
-    10764: "真人秀", 10766: "肥皂剧", 10767: "脱口秀", 10768: "战争政治", 37: "西部",
-}
-
-# 默认地区分类规则(按顺序匹配,命中即止;可用配置 region_categories 覆盖)
-DEFAULT_REGION_CATEGORIES = {
-    "欧美剧": ["US", "GB", "FR", "DE", "IT", "ES", "PT", "NL", "BE", "AT", "CH",
-              "SE", "NO", "DK", "FI", "IE", "PL", "CZ", "GR", "CA", "AU", "NZ", "RU"],
-    "国产剧": ["CN"],
-    "港台剧": ["HK", "TW"],
-    "日韩剧": ["JP", "KR"],
-    "亚洲剧": ["TH", "SG", "MY", "IN", "ID", "PH", "VN", "TR"],
-}
-
-
-def region_category(origin_country: list, rules: dict) -> Optional[str]:
-    """按出品国家/地区匹配分类(如 欧美剧/国产剧)。未命中返回 None。"""
-    if not origin_country:
-        return None
-    countries = {c.upper() for c in origin_country}
-    for name, codes in (rules or {}).items():
-        if countries & {c.upper() for c in codes}:
-            return name
-    return None
-
 
 @dataclass
 class MediaInfo:
-    """识别结果(供命名模板使用的规范字段)。"""
+    """识别结果(供命名模板与类别规则使用的规范字段)。"""
 
     title: str = ""
     original_title: str = ""
     year: Optional[int] = None
     media_type: str = ""          # movie / tv
     tmdb_id: Optional[int] = None
-    category: Optional[str] = None  # 类型类别(如"科幻")
-    origin_country: List[str] = field(default_factory=list)  # 出品国家/地区(剧集)
+    original_language: str = ""   # 原始语种(如 zh/en/ja)
+    genre_ids: List[int] = field(default_factory=list)   # 类型 ID 列表
+    origin_country: List[str] = field(default_factory=list)   # 出品国家/地区(剧集)
+    production_countries: List[str] = field(default_factory=list)  # 制片国家/地区(电影,需详情接口)
     overview: str = ""
 
     def to_dict(self) -> dict:
@@ -75,8 +44,10 @@ class MediaInfo:
             "year": self.year,
             "media_type": self.media_type,
             "tmdb_id": self.tmdb_id,
-            "category": self.category,
+            "original_language": self.original_language,
+            "genre_ids": self.genre_ids,
             "origin_country": self.origin_country,
+            "production_countries": self.production_countries,
             "overview": self.overview,
         }
 
@@ -120,7 +91,7 @@ class TmdbRecognizer:
             logger.info(f"TMDB 识别: {meta.title} -> {result.title} ({result.year})"
                         f"[id={result.tmdb_id} {result.media_type}]")
         else:
-            # 缓存 None 结果(30 天),避免反复请求未命中
+            # 缓存 None 结果,避免反复请求未命中
             self.store.cache_set(key, {})
         return result
 
@@ -165,8 +136,10 @@ class TmdbRecognizer:
             year=_extract_year(best),
             media_type=media_type,
             tmdb_id=best.get("id"),
-            category=self._category_of(media_type, best.get("genre_ids") or []),
+            original_language=best.get("original_language") or "",
+            genre_ids=list(best.get("genre_ids") or []),
             origin_country=list(best.get("origin_country") or []),
+            production_countries=list(best.get("production_countries") or []),
             overview=best.get("overview") or "",
         )
 
@@ -196,14 +169,6 @@ class TmdbRecognizer:
             if name == t:
                 return r
         return candidates[0]
-
-    @staticmethod
-    def _category_of(media_type: str, genre_ids: list) -> Optional[str]:
-        mapping = _TV_CATEGORY_MAP if media_type == "tv" else _MOVIE_CATEGORY_MAP
-        for gid in genre_ids:
-            if gid in mapping:
-                return mapping[gid]
-        return None
 
 
 def _extract_year(item: dict) -> Optional[int]:
