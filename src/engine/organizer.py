@@ -166,6 +166,9 @@ class TransferEngine:
                             "overwrite": overwrite_eff})
 
         if not planned:
+            # 全部文件已整理过(幂等命中):仍需要打标签,否则轮询会反复扫描
+            if not preview and skipped > 0:
+                self._finalize(source, dir_conf, download_hash, downloader, True)
             return OrganizeResult(total=len(items), skipped=skipped,
                                   message="全部文件已整理过或无法计算目标路径")
 
