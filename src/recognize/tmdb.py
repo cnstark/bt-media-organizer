@@ -175,24 +175,30 @@ class TmdbRecognizer:
 
     @staticmethod
     def _pick_best(results: list, title: str, query: str, year: Optional[int]):
-        """打分选优:年份命中 +2,标题/原名精确命中 +2,查询词覆盖数加权。"""
-        t = title.strip().lower()
-        q_words = {w for w in re.split(r"[^a-z0-9]+", (query or t).lower()) if w}
+        """打分选优(对齐 MoviePilot _match_score):包含式标题匹配 +2,年份 +1,词重叠兜底。"""
+        meta_names = [n.strip().lower() for n in (title, query) if n and n.strip()]
+        q_words = {w for w in re.split(r"[^a-z0-9]+", (query or title).lower()) if w}
         best_r, best_score = None, -1
         for r in results:
             score = 0
             if year and _extract_year(r) == year:
-                score += 2
+                score += 1
+            titles = set()
             for name_field in ("name", "title", "original_name", "original_title"):
-                name = (r.get(name_field) or "").strip().lower()
-                if name and name == t:
+                n = (r.get(name_field) or "").strip().lower()
+                if n:
+                    titles.add(n)
+            # 标题包含匹配(双向,同 MP: meta_name in t or t in meta_name)
+            for mn in meta_names:
+                if any(mn in t or t in mn for t in titles):
                     score += 2
                     break
-            if q_words:
-                r_words = set()
-                for name_field in ("name", "title", "original_name", "original_title"):
-                    r_words |= {w for w in re.split(r"[^a-z0-9]+", (r.get(name_field) or "").lower()) if w}
-                score += len(q_words & r_words) / max(len(q_words), 1)
+            # 词重叠作为次级排序(处理双语名)
+            r_words = set()
+            for t in titles:
+                r_words |= {w for w in re.split(r"[^a-z0-9]+", t) if w}
+            if q_words and r_words:
+                score += len(q_words & r_words) / max(len(q_words), 1) / 10
             if score > best_score:
                 best_score, best_r = score, r
         return best_r

@@ -47,6 +47,13 @@ _NOISE_RE = re.compile(r"\b(dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi|h
 _SE_EXTRA_WORDS = {"season", "ep", "episode", "episodes", "e", "s", "集", "季", "话"}
 # 内嵌 tmdbid 等媒体 ID:{tmdbid=12345} / {mediaid=123}
 _MEDIAID_RE = re.compile(r"\{[a-zA-Z]+=\d+\}")
+# 括号处理(对齐 MoviePilot metavideo.py):
+# - 首个 [中文] 或 [发布组] 括号:非英文发布名格式则整个剥掉
+# - 括号内为英文发布名(含年份+资源类型)时保留内容去括号
+_FIRST_BRACKET_RE = re.compile(r"^[\[【](.+?)[\]】]")
+_BRACKET_DOT_TITLE_RE = re.compile(r"[A-Za-z]+\..+(?:19|20)\d{2}")
+_BRACKET_RESOURCE_RE = re.compile(r"(?:2160|1080|720|480)[PIpi]|4K|UHD|Blu[\-. ]?ray|REMUX|WEB[\-. ]?DL|HDTV")
+
 # 分隔符(把 . _ 空格 [] () 全部归一为空格)
 _SPLIT_RE = re.compile(r"[._\s\[\](){}]+")
 
@@ -219,6 +226,16 @@ def parse_filename(name: str) -> ParsedMeta:
     ext = path.suffix
 
     meta = ParsedMeta(raw_name=name, ext=ext)
+
+    # 首个括号处理(对齐 MP):括号内容非英文发布名格式时剥掉
+    bracket = _FIRST_BRACKET_RE.match(stem)
+    if bracket:
+        bracket_content = bracket.group(1)
+        if _BRACKET_DOT_TITLE_RE.search(bracket_content) \
+                and _BRACKET_RESOURCE_RE.search(bracket_content):
+            stem = bracket_content + stem[bracket.end():]
+        else:
+            stem = stem[bracket.end():]
 
     # 先提取末尾资源组/Part(避免与后续 token 分类粘连,如 x264-GROUP)
     gm = _GROUP_RE.search(stem)
