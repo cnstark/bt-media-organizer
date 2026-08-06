@@ -1,5 +1,5 @@
 #!/bin/bash
-# lite-organizer 重启脚本:stop → rm → build → up
+# bt-media-organizer 重启脚本:stop → rm → build → up
 # 用法: ./restart.sh
 set -e
 cd "$(dirname "$0")"
@@ -17,4 +17,4 @@ echo "==> [4/4] 容器状态"
 docker compose ps
 
 echo ""
-echo "查看日志: docker compose logs -f lite-organizer"
+echo "查看日志: docker compose logs -f bt-media-organizer"

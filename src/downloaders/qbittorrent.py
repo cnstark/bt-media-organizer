@@ -10,7 +10,7 @@ import httpx
 from ..config import DownloaderConf
 from .base import DownloaderAdapter, TorrentInfo, WebhookEvent
 
-logger = logging.getLogger("lite-organizer.qbittorrent")
+logger = logging.getLogger("bt-media-organizer.qbittorrent")
 
 # qBittorrent webhook 报文事件类型(仅处理下载完成)
 _FINISH_EVENTS = {"torrent_finished", "torrent_completed"}

@@ -10,7 +10,7 @@ from .config import LogConf
 
 
 def setup_logger(conf: LogConf) -> logging.Logger:
-    logger = logging.getLogger("lite-organizer")
+    logger = logging.getLogger("bt-media-organizer")
     logger.setLevel(getattr(logging, conf.level.upper(), logging.INFO))
     logger.propagate = False
     if logger.handlers:

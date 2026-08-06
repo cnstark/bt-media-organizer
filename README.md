@@ -1,4 +1,4 @@
-# lite-organizer
+# bt-media-organizer
 
 轻量级媒体整理服务:下载完成后自动**识别 → 规范化重命名 → 转移**进媒体库。
 不依赖 MoviePilot,事件触发 + 轮询对账双通道。参考 MoviePilot v2.15.4 实现思路精简而成。
@@ -21,7 +21,7 @@
 ```bash
 cp config.example.yaml config.yaml   # 修改配置
 pip install -r requirements.txt
-python -m src.main --config config.yaml   # 或设 LITE_CONFIG 指定路径、LITE_TOKEN 覆盖 token
+python -m src.main --config config.yaml   # 或设 BT_MEDIA_CONFIG 指定路径、BT_MEDIA_TOKEN 覆盖 token
 ```
 
 或 Docker:
@@ -34,11 +34,11 @@ docker compose -f docker-compose.example.yml up -d --build
 
 ## qBittorrent 接入(事件触发)
 
-> ⚠️ **路径一致性要求**:qBittorrent 与 lite-organizer 必须挂载相同的目录路径(例如两者都把宿主 `/vol1/1004/media1` 挂载为 `/media/media1`)。回调报文/脚本中的路径会**原样透传**给整理引擎,不做任何宿主↔容器路径映射;路径不一致会导致「未匹配到下载目录配置」而跳过。
+> ⚠️ **路径一致性要求**:qBittorrent 与 bt-media-organizer 必须挂载相同的目录路径(例如两者都把宿主 `/vol1/1004/media1` 挂载为 `/media/media1`)。回调报文/脚本中的路径会**原样透传**给整理引擎,不做任何宿主↔容器路径映射;路径不一致会导致「未匹配到下载目录配置」而跳过。
 
 qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 1. 将 `scripts/qb-notify.sh` 放入 qB 容器(如 `/config/qb-notify.sh`,保留可执行权限)
-2. 给 qB 容器设置环境变量 `LITE_TOKEN=<config 里的 token>`(或放置令牌文件 `/config/lite-token`,内容为 token 无换行);同时设置 `LITE_API=http://<lite-organizer 主机>:8900`(或直接修改脚本顶部 `API` 变量,勿提交私有地址)
+2. 给 qB 容器设置环境变量 `BT_MEDIA_TOKEN=<config 里的 token>`(或放置令牌文件 `/config/bt-media-token`,内容为 token 无换行);同时设置 `BT_MEDIA_API=http://<bt-media-organizer 主机>:8900`(或直接修改脚本顶部 `API` 变量,勿提交私有地址)
 3. WebUI → 选项 → 下载 → **完成后运行外部程序** 填:`/config/qb-notify.sh "%F"`
 4. 同时配置 `downloaders[].poll_interval`(如 60s)作为兜底对账
 
@@ -48,7 +48,7 @@ qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 
 - `directories[].category_folder: true` 开启按识别类别自动建子目录(未识别归"未分类");`category_rules` 用 MP 格式自定义规则(如 `{纪录片: {genre_ids: "99"}}`),留空用内置 MP 默认规则
 - `recognize.tmdb`:需 api_key 启用;`api_base` 可换镜像/自建反代;`proxy` 可配代理(留空读系统 HTTPS_PROXY)
-- 环境变量:`LITE_CONFIG`(配置文件路径)、`LITE_TOKEN`(覆盖 server.token)、`PUID`/`PGID`(Docker 降权)
+- 环境变量:`BT_MEDIA_CONFIG`(配置文件路径)、`BT_MEDIA_TOKEN`(覆盖 server.token)、`PUID`/`PGID`(Docker 降权)
 
 ## API
 
@@ -117,5 +117,5 @@ python tests/test_integration.py
 
 ## 文档
 
-- 需求:见 `workspace/docs/lite-organizer-requirements.md`
-- 设计:见 `docs/lite-organizer-design.md`(仓库内)
+- 需求:见 `workspace/docs/bt-media-organizer-requirements.md`
+- 设计:见 `docs/bt-media-organizer-design.md`(仓库内)

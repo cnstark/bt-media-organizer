@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from ..config import Config
 from ..engine import TransferEngine
 
-logger = logging.getLogger("lite-organizer.api")
+logger = logging.getLogger("bt-media-organizer.api")
 
 _ROUTE_RE = re.compile(r"^/api/v1/history/(\d+)/redo$")
 
@@ -28,7 +28,7 @@ def _json(obj) -> bytes:
 class _Handler(BaseHTTPRequestHandler):
     """请求处理器;server 引用挂在类属性上。"""
 
-    server_version = "lite-organizer/0.1"
+    server_version = "bt-media-organizer/0.1"
     engine: TransferEngine = None
     token: str = ""
 

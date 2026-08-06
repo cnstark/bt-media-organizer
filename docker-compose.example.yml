@@ -1,7 +1,7 @@
 services:
-  lite-organizer:
+  bt-media-organizer:
     build: .
-    container_name: lite-organizer
+    container_name: bt-media-organizer
     restart: unless-stopped
     ports:
       - "8900:8900"
@@ -19,7 +19,7 @@ services:
     environment:
       - TZ=Asia/Shanghai
       # 可选:覆盖 config.yaml 里的 server.token
-      # - LITE_TOKEN=your-token
+      # - BT_MEDIA_TOKEN=your-token
     # TMDB 域名解析异常时(如 DNS 污染),可用 extra_hosts 固定解析:
     # extra_hosts:
     #   - "api.themoviedb.org:3.170.103.81"
