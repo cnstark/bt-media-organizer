@@ -35,10 +35,16 @@ class QBittorrentAdapter(DownloaderAdapter):
                 "/api/v2/auth/login",
                 data={"username": self.conf.username, "password": self.conf.password},
             )
-            if resp.status_code == 200 and resp.text == "Ok.":
+            # qB 5.x 对白名单/免登录来源的 login 请求返回 204 No Content(而非 200 "Ok."),
+            # 此时无需会话即可访问 API,同样视为登录成功
+            if resp.status_code == 204 or (
+                resp.status_code == 200 and resp.text.strip() == "Ok."
+            ):
                 self._logged_in = True
                 return True
-            logger.error(f"[{self.name}] qBittorrent 登录失败: {resp.status_code} {resp.text[:200]}")
+            logger.error(
+                f"[{self.name}] qBittorrent 登录失败: {resp.status_code} {resp.text[:200]}"
+            )
         except httpx.HTTPError as e:
             logger.error(f"[{self.name}] qBittorrent 登录异常: {e}")
         self._logged_in = False
