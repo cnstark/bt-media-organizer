@@ -11,3 +11,4 @@ data/
 
 # 系统
 .DS_Store
+docker-compose.yml
