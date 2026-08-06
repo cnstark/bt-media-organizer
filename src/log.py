@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from logging.handlers import RotatingFileHandler
 
@@ -25,6 +26,10 @@ def setup_logger(conf: LogConf) -> logging.Logger:
 
     if conf.file:
         try:
+            # 确保日志目录存在(如 /data/logs),否则 RotatingFileHandler 会 OSError 静默降级为仅 stdout
+            log_dir = os.path.dirname(conf.file)
+            if log_dir:
+                os.makedirs(log_dir, exist_ok=True)
             fh = RotatingFileHandler(
                 conf.file, maxBytes=10 * 1024 * 1024, backupCount=5, encoding="utf-8"
             )

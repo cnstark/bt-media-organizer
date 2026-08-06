@@ -70,4 +70,4 @@ history:
 
 log:
   level: info                   # debug / info / warning / error
-  file: "./data/organizer.log"  # 空 = 仅 stdout
+  file: "/data/logs/organizer.log"  # 日志文件路径,父目录自动创建;空 = 仅 stdout。docker 部署时挂载 logs 目录到宿主机便于 debug(见 docker-compose)

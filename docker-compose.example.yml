@@ -9,6 +9,8 @@ services:
       # 配置与数据
       - ./config.yaml:/config/config.yaml:ro
       - ./data:/data
+      # 运行日志(容器内 /data/logs,即宿主 ./data/logs);如需单独目录可改为 - ./logs:/data/logs
+      - ./data/logs:/data/logs
       # 下载目录与媒体库(示例,按实际路径修改)
       # ⚠️ 必须与 qBittorrent 容器的挂载路径一致(两边看到相同的 /data/downloads、/data/media 等),
       #    整理服务不做宿主↔容器路径映射
