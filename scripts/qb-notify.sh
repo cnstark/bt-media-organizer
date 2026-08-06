@@ -1,7 +1,8 @@
 #!/bin/sh
 # qBittorrent 下载完成回调 → lite-organizer 自动整理
-# 由 qB "Run external program on torrent completion" 调用,参数 %F = 内容路径(宿主路径)
+# 由 qB "Run external program on torrent completion" 调用,参数 %F = 内容路径
 # 用法: qb-notify.sh <content_path>
+# 注意: qB 与 lite-organizer 容器需挂载相同路径,不做路径映射,保证地址一致
 
 # 令牌来源(二选一):环境变量 LITE_TOKEN > 令牌文件 /config/lite-token
 # 不要硬编码 token 到脚本(仓库公开,会泄露)
@@ -20,15 +21,8 @@ if [ -z "$1" ]; then
     exit 0
 fi
 
-# 宿主路径 → 容器路径映射(/volX/1004/mediaN → /media/mediaN)
-case "$1" in
-    /vol*/1004/media*)
-        P=$(printf '%s' "$1" | sed -E 's|^/vol[0-9]+/1004/media([0-9]+)|/media/media\1|')
-        ;;
-    *)
-        P="$1"
-        ;;
-esac
+# 不做路径映射:qB 与 lite-organizer 挂载相同路径,直接透传
+P="$1"
 
 # 给文件系统一点稳定时间(校验/落盘)
 sleep 3
