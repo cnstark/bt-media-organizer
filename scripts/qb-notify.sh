@@ -15,7 +15,9 @@ if [ -z "$TOKEN" ]; then
     exit 0
 fi
 
-API="http://10.8.8.2:8900/api/v1/transfer"
+# lite-organizer 服务地址(建议经环境变量 LITE_API 注入,勿在仓库提交私有地址)
+# 默认值按本机部署环境修改;qB 容器内 127.0.0.1 指向 qB 自身,务必设为 lite-organizer 可达地址
+API="${LITE_API:-http://10.8.8.2:8900}/api/v1/transfer"
 
 if [ -z "$1" ]; then
     exit 0

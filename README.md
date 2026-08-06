@@ -38,7 +38,7 @@ docker compose -f docker-compose.example.yml up -d --build
 
 qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 1. 将 `scripts/qb-notify.sh` 放入 qB 容器(如 `/config/qb-notify.sh`,保留可执行权限)
-2. 给 qB 容器设置环境变量 `LITE_TOKEN=<config 里的 token>`(或放置令牌文件 `/config/lite-token`,内容为 token 无换行)
+2. 给 qB 容器设置环境变量 `LITE_TOKEN=<config 里的 token>`(或放置令牌文件 `/config/lite-token`,内容为 token 无换行);同时设置 `LITE_API=http://<lite-organizer 主机>:8900`(或直接修改脚本顶部 `API` 变量,勿提交私有地址)
 3. WebUI → 选项 → 下载 → **完成后运行外部程序** 填:`/config/qb-notify.sh "%F"`
 4. 同时配置 `downloaders[].poll_interval`(如 60s)作为兜底对账
 
@@ -56,11 +56,13 @@ qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 |---|---|---|
 | GET | `/health` | 健康检查(免鉴权) |
 | POST | `/api/v1/webhook?token=` | qB webhook 入口(可加 `&downloader=qb`) |
-| POST | `/api/v1/transfer` | 手动整理,body:`{path 或 hash, preview, force, transfer_type, target_path}` |
+| POST | `/api/v1/transfer` | 手动整理,body:`{path 或 hash, downloader?, preview, force, transfer_type, target_path}` |
 | GET | `/api/v1/history?status=&limit=&offset=` | 历史查询 |
 | POST | `/api/v1/history/{id}/redo` | 按历史重新整理 |
 | GET | `/api/v1/queue` | 运行状态 |
 | POST | `/api/v1/poll` | 立即触发轮询 |
+
+> 鉴权:除 `/health` 外均需 token,来源 `?token=` 或 `X-Token` 头。
 
 示例:
 
@@ -90,7 +92,9 @@ src/
 ├── parse/filename.py     # 文件名解析
 ├── storage/local.py      # copy/move/hardlink/softlink
 ├── downloaders/          # qBittorrent 适配器(协议可扩展)
-├── recognize/tmdb.py     # TMDB 识别(可选)
+├── recognize/
+│   ├── tmdb.py           # TMDB 识别(可选)
+│   └── category.py       # 类别规则(对齐 MP category.yaml)
 ├── engine/
 │   ├── namer.py          # 命名模板渲染
 │   ├── planner.py        # 规划(收集/过滤/排序)
