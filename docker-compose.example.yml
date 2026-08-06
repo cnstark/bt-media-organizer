@@ -10,6 +10,8 @@ services:
       - ./config.yaml:/config/config.yaml:ro
       - ./data:/data
       # 下载目录与媒体库(示例,按实际路径修改)
+      # ⚠️ 必须与 qBittorrent 容器的挂载路径一致(两边看到相同的 /data/downloads、/data/media 等),
+      #    整理服务不做宿主↔容器路径映射
       - /path/to/downloads:/data/downloads
       - /path/to/media:/data/media
     environment:

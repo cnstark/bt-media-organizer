@@ -31,6 +31,15 @@ docker compose -f docker-compose.example.yml up -d --build
 
 ## qBittorrent 接入(事件触发)
 
+> ⚠️ **路径一致性要求**:qBittorrent 与 lite-organizer 必须挂载相同的目录路径(例如两者都把宿主 `/vol1/1004/media1` 挂载为 `/media/media1`)。回调报文/脚本中的路径会**原样透传**给整理引擎,不做任何宿主↔容器路径映射;路径不一致会导致「未匹配到下载目录配置」而跳过。
+
+方式一(推荐,无 WebUI Webhook 依赖):qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`
+1. 将 `scripts/qb-notify.sh` 放入 qB 容器(如 `/config/qb-notify.sh`,保留可执行权限)
+2. 给 qB 容器设置环境变量 `LITE_TOKEN=<config 里的 token>`(或放置令牌文件 `/config/lite-token`,内容为 token 无换行)
+3. WebUI → 选项 → 下载 → **完成后运行外部程序** 填:`/config/qb-notify.sh "%F"`
+4. 同时配置 `downloaders[].poll_interval`(如 60s)作为兜底对账
+
+方式二:qB WebUI 原生 Webhooks
 1. qBittorrent WebUI → 设置 → **Web UI** → 找到 **Webhooks** 区域
 2. 添加 webhook,URL 填:`http://<本机>:8900/api/v1/webhook?token=<config 里的 token>`
 3. 勾选事件:**Torrent finished**(下载完成)
