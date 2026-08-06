@@ -10,6 +10,7 @@
 - ✅ 四种转移方式:move / copy / hardlink / softlink
 - ✅ 蓝光原盘整体整理、字幕/音频跟随主视频 + 语言标记(`.zh-cn` 等)
 - ✅ 覆盖策略:never / always / size / latest
+- ✅ 类别自动分类(可选):按识别类别建子目录,规则对齐 MoviePilot category.yaml(可自定义 category_rules)
 - ✅ qBittorrent 下载完成事件触发(外部程序回调,秒级)
 - ✅ 定期轮询下载器对账兜底(事件丢失自愈)
 - ✅ SQLite 历史记录 + 幂等去重 + 失败自动重试(下轮轮询)
@@ -20,7 +21,7 @@
 ```bash
 cp config.example.yaml config.yaml   # 修改配置
 pip install -r requirements.txt
-python -m src.main --config config.yaml
+python -m src.main --config config.yaml   # 或设 LITE_CONFIG 指定路径、LITE_TOKEN 覆盖 token
 ```
 
 或 Docker:
@@ -28,6 +29,8 @@ python -m src.main --config config.yaml
 ```bash
 docker compose -f docker-compose.example.yml up -d --build
 ```
+
+> Docker 部署支持 `PUID`/`PGID` 环境变量降权运行(默认 root,参照 MoviePilot);TMDB 网络不通时可配置 `recognize.tmdb.api_base` 换镜像/自建反代(见 config.example.yaml 注释)。
 
 ## qBittorrent 接入(事件触发)
 
@@ -40,6 +43,12 @@ qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 4. 同时配置 `downloaders[].poll_interval`(如 60s)作为兜底对账
 
 > 事件与轮询共用同一幂等检查:失败的文件不会打「已整理」标签,下轮轮询自动重试。
+
+## 配置要点
+
+- `directories[].category_folder: true` 开启按识别类别自动建子目录(未识别归"未分类");`category_rules` 用 MP 格式自定义规则(如 `{纪录片: {genre_ids: "99"}}`),留空用内置 MP 默认规则
+- `recognize.tmdb`:需 api_key 启用;`api_base` 可换镜像/自建反代;`proxy` 可配代理(留空读系统 HTTPS_PROXY)
+- 环境变量:`LITE_CONFIG`(配置文件路径)、`LITE_TOKEN`(覆盖 server.token)、`PUID`/`PGID`(Docker 降权)
 
 ## API
 
@@ -96,9 +105,13 @@ src/
 python tests/test_filename.py
 python tests/test_namer.py
 python tests/test_planner.py
+python tests/test_tmdb.py
+python tests/test_category.py
+python tests/test_category_integration.py
+python tests/test_integration.py
 ```
 
 ## 文档
 
 - 需求:见 `workspace/docs/lite-organizer-requirements.md`
-- 设计:见 `workspace/docs/lite-organizer-design.md`
+- 设计:见 `docs/lite-organizer-design.md`(仓库内)
