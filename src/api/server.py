@@ -88,9 +88,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._denied()
             return
         body = self._read_body()
-        if path == "/api/v1/webhook":
-            self._webhook(body)
-        elif path == "/api/v1/transfer":
+        if path == "/api/v1/transfer":
             self._transfer(body)
         elif path == "/api/v1/poll":
             self._poll(body)
@@ -100,16 +98,6 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, _json({"code": 404, "message": "not found"}))
 
     # ---------------- 业务 ----------------
-
-    def _webhook(self, body: dict) -> None:
-        query = parse_qs(urlparse(self.path).query)
-        downloader = (query.get("downloader") or [None])[0]
-        result = self.engine.on_webhook(body, downloader=downloader)
-        if result is None:
-            # 非完成事件 / 已在处理 / 已整理过
-            self._send(200, _json({"code": 0, "message": "ignored"}))
-            return
-        self._send(200, _json({"code": 0, "data": _result_dict(result)}))
 
     def _transfer(self, body: dict) -> None:
         source: Optional[Path] = None

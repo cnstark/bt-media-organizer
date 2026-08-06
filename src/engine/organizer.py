@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..config import Config, TransferDirConf
-from ..downloaders import DownloaderAdapter, QBittorrentAdapter, TorrentInfo, WebhookEvent
+from ..downloaders import DownloaderAdapter, QBittorrentAdapter, TorrentInfo
 from ..history import HistoryStore
 from ..parse.filename import parse_filename, subtitle_lang_tag
 from ..recognize.category import DEFAULT_MOVIE_RULES, DEFAULT_TV_RULES, match_category, parse_rules
@@ -345,40 +345,6 @@ class TransferEngine:
             local.cleanup_empty_dirs(source, stop_at=stop_at)
 
     # ------------------------------------------------------------ 触发入口
-
-    def on_webhook(self, payload: dict, downloader: str = None) -> Optional[OrganizeResult]:
-        """处理下载器 webhook;非完成事件或已处理返回 None。"""
-        adapter = self._resolve_adapter(downloader)
-        if not adapter:
-            return None
-        event: Optional[WebhookEvent] = adapter.parse_webhook(payload)
-        if not event:
-            return None
-        logger.info(f"收到下载完成事件: {event.name} [{event.hash}]")
-
-        if self._is_processing(event.hash):
-            logger.info(f"{event.hash} 正在整理中,跳过")
-            return None
-        # 已全部成功过且无失败记录 → 跳过(webhook 重复推送)
-        if self.store.success_count_by_hash(event.hash) > 0 \
-                and self.store.fail_count_by_hash(event.hash) == 0:
-            logger.info(f"{event.hash} 已整理完成,跳过")
-            return None
-
-        content = Path(event.content_path)
-        if not content.exists():
-            # qB contentPath 可能指向单文件
-            logger.warning(f"webhook 内容路径不存在: {content}")
-            return None
-        self._set_processing(event.hash, True)
-        try:
-            return self.organize(
-                source=content,
-                download_hash=event.hash,
-                downloader=adapter.name,
-            )
-        finally:
-            self._set_processing(event.hash, False)
 
     def poll_once(self, downloader: str = None) -> dict:
         """对账一轮:整理所有「已完成且未打标签」的任务。返回统计。"""

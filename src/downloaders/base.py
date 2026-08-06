@@ -4,7 +4,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 
 @dataclass
@@ -19,18 +19,6 @@ class TorrentInfo:
     tags: List[str] = field(default_factory=list)
     size: int = 0
     state: str = ""
-
-
-@dataclass
-class WebhookEvent:
-    """统一 webhook 完成事件。"""
-
-    event: str = "torrent_finished"
-    hash: str = ""
-    name: str = ""
-    save_path: Path = Path("")
-    content_path: Path = Path("")
-    downloader: str = ""
 
 
 class DownloaderAdapter(ABC):
@@ -49,10 +37,6 @@ class DownloaderAdapter(ABC):
     @abstractmethod
     def delete_torrent(self, hash: str, delete_files: bool = True) -> bool:
         """删除下载器任务(预留,默认不使用)。"""
-
-    @abstractmethod
-    def parse_webhook(self, payload: dict) -> Optional[WebhookEvent]:
-        """把下载器 webhook 报文归一化为 WebhookEvent;非完成事件返回 None。"""
 
     @staticmethod
     def has_tag(torrent: TorrentInfo, tag: str) -> bool:

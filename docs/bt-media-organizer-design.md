@@ -22,7 +22,7 @@
 server:
   host: 0.0.0.0
   port: 8900
-  token: "change-me"            # API/webhook 鉴权(query token 或 X-Token 头)
+  token: "change-me"            # API 鉴权(query token 或 X-Token 头)
 
 engine:
   threads: 2                    # 单次整理内文件并发数
@@ -63,7 +63,6 @@ downloaders:
     password: "***"
     poll_interval: 60           # 秒;0=关闭轮询
     tag: "已整理"               # 完成标签(对账依据)
-    webhook: true               # 启用 webhook 入口
 
 recognize:
   tmdb:
@@ -132,7 +131,7 @@ CREATE TABLE IF NOT EXISTS media_cache (     -- TMDB 识别缓存
 - 跳过条件:该 `source_path` 存在 `status=success` 记录(force 除外);无唯一索引,靠应用层检查 + 普通索引(失败记录会随重试多次写入)
 - 批次完成判定:某 torrent 全部规划文件均 success(按 `download_hash` 统计失败数=0)→ 打标签;
   全部文件因幂等命中而跳过时同样打标签(避免轮询反复扫描同一任务)
-- webhook/轮询前置检查:`success_count_by_hash>0 且 fail_count_by_hash==0` → 直接跳过
+- 轮询前置检查:`success_count_by_hash>0 且 fail_count_by_hash==0` → 直接跳过
 - 重整理(redo):删除旧记录 → force 重新执行
 
 ## 4. 模块接口(定稿)
@@ -178,22 +177,16 @@ class TorrentInfo:
     hash: str; name: str; save_path: Path; content_path: Path
     category: str; tags: list[str]; size: int; state: str
 
-@dataclass
-class WebhookEvent:
-    event: str; hash: str; name: str; save_path: Path; content_path: Path
-    downloader: str = ""        # 适配器名(解析时由适配器填充)
-
 class DownloaderAdapter(ABC):
     name: str
     def list_finished(self) -> list[TorrentInfo]       # 已完成任务(未过滤标签,由调用方过滤)
     def add_tag(self, hash: str) -> bool               # 打完成标签(对账依据)
     def delete_torrent(self, hash: str, delete_files: bool = True) -> bool  # 预留,默认不使用
-    def parse_webhook(self, payload: dict) -> Optional[WebhookEvent]
     @staticmethod
     def has_tag(torrent: TorrentInfo, tag: str) -> bool  # tag in torrent.tags
 ```
 
-`qbittorrent.py`:httpx 客户端,登录拿 SID cookie;`torrents/info?filter=completed`;`addTags`。webhook 归一化:`event==torrent_finished` 且 hash 非空。
+`qbittorrent.py`:httpx 客户端,登录拿 SID cookie;`torrents/info?filter=completed`;`addTags`。
 
 ### 4.4 `src/engine/namer.py`
 
@@ -252,7 +245,6 @@ class TransferEngine:
                  downloader: str = None, preview: bool = False,
                  force: bool = False, transfer_type: str = None,
                  target_path: Path = None) -> OrganizeResult   # 不抛异常,失败以 message 返回
-    def on_webhook(self, payload: dict, downloader: str = None) -> OrganizeResult | None
     def poll_once(self, downloader: str = None) -> dict   # 对账一轮:{scanned, organized, skipped, failed}
     def redo(self, history_id: int) -> tuple[bool, str, OrganizeResult | None]
     def status(self) -> dict            # {processing, recent(最近20条), downloaders}
@@ -269,7 +261,6 @@ class TransferEngine:
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/health` | 免鉴权 |
-| POST | `/api/v1/webhook?downloader=` | qB webhook 直入(需 token);非完成事件/已处理返回 `{"code":0,"message":"ignored"}` |
 | POST | `/api/v1/transfer` | body `{path 或 hash, downloader?, preview?, force?, transfer_type?, target_path?}`;hash 经下载器解析为 content_path |
 | GET | `/api/v1/history?status=&limit=&offset=` | 历史查询(limit 默认 50,上限 500) |
 | POST | `/api/v1/history/{id}/redo` | 重整理(校验源仍存在,删旧记录后 force 重做) |
@@ -288,22 +279,14 @@ class TransferEngine:
 
 ## 5. 关键流程时序
 
-### 5.1 触发(两条入口,共用同一幂等检查)
+### 5.1 触发(唯一入口:qB「下载完成后运行外部程序」→ `/api/v1/transfer`)
 
-**入口 A:qB「下载完成后运行外部程序」→ `/api/v1/transfer`(推荐,秒级)**
 ```
-qB 完成下载 → 外部程序 scripts/qb-notify.sh "%F"(sleep 3 等落盘)
-  → POST /api/v1/transfer {path: content_path}(token 校验,幂等)
-  → engine.organize(content_path) → 全部成功 → add_tag(hash) → 结束
-```
-
-**入口 B:qB WebUI Webhook → `/api/v1/webhook`(需 qB 配置 webhook,适配器字段大小写兼容)**
-```
-qB 完成下载 → POST {event:"torrent_finished"/"torrent_completed", hash, contentPath, ...}
-  → /api/v1/webhook(token 校验,?downloader= 指定适配器)
-  → engine.on_webhook():处理中集合+历史计数去重
-  → organize(content_path, hash, downloader)
-  → 全部成功 → add_tag(hash) → 结束;非完成事件/已处理 → {"code":0,"message":"ignored"}
+qB 完成下载 → 外部程序 scripts/qb-notify.sh "%F" "%I"(sleep 3 等落盘)
+  → POST /api/v1/transfer {path: content_path, hash?, downloader?}(token 校验,幂等)
+  → engine.organize(content_path, hash, downloader)
+  → 全部成功 → add_tag(hash) → 结束
+  (不带 hash 时退化为纯路径整理,标签由轮询兜底补打,最长 60s)
 ```
 
 > **路径一致性**:qB 与 bt-media-organizer 容器必须挂载相同路径,contentPath/脚本参数原样透传,不做宿主↔容器映射。`scripts/qb-notify.sh` 的 token 经环境变量 `BT_MEDIA_TOKEN` 或文件 `/config/bt-media-token` 注入,脚本不硬编码 token。

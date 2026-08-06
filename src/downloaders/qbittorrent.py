@@ -8,12 +8,9 @@ from typing import List, Optional
 import httpx
 
 from ..config import DownloaderConf
-from .base import DownloaderAdapter, TorrentInfo, WebhookEvent
+from .base import DownloaderAdapter, TorrentInfo
 
 logger = logging.getLogger("bt-media-organizer.qbittorrent")
-
-# qBittorrent webhook 报文事件类型(仅处理下载完成)
-_FINISH_EVENTS = {"torrent_finished", "torrent_completed"}
 
 
 class QBittorrentAdapter(DownloaderAdapter):
@@ -113,25 +110,4 @@ class QBittorrentAdapter(DownloaderAdapter):
             "/api/v2/torrents/delete", {"hashes": hash, "deleteFiles": "true" if delete_files else "false"}
         )
 
-    def parse_webhook(self, payload: dict) -> Optional[WebhookEvent]:
-        if not isinstance(payload, dict):
-            return None
-        # qBittorrent webhook 字段大小写兼容
-        event = payload.get("event") or payload.get("Event") or ""
-        if event not in _FINISH_EVENTS:
-            return None
-        hash_ = payload.get("hash") or payload.get("Hash") or ""
-        name = payload.get("name") or payload.get("Name") or ""
-        save_path = payload.get("savePath") or payload.get("SavePath") or ""
-        content_path = payload.get("contentPath") or payload.get("ContentPath") or save_path
-        if not hash_ or not content_path:
-            logger.warning(f"[{self.name}] webhook 报文缺少 hash/contentPath: {payload}")
-            return None
-        return WebhookEvent(
-            event=event,
-            hash=hash_,
-            name=name,
-            save_path=Path(save_path),
-            content_path=Path(content_path),
-            downloader=self.name,
-        )
+

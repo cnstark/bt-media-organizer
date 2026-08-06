@@ -86,7 +86,6 @@ class DownloaderConf:
     password: str = ""
     poll_interval: int = 60
     tag: str = "已整理"
-    webhook: bool = True
 
 
 @dataclass

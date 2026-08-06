@@ -55,7 +55,6 @@ qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/health` | 健康检查(免鉴权) |
-| POST | `/api/v1/webhook?token=` | qB webhook 入口(可加 `&downloader=qb`) |
 | POST | `/api/v1/transfer` | 手动整理,body:`{path 或 hash, downloader?, preview, force, transfer_type, target_path}` |
 | GET | `/api/v1/history?status=&limit=&offset=` | 历史查询 |
 | POST | `/api/v1/history/{id}/redo` | 按历史重新整理 |
