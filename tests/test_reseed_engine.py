@@ -147,6 +147,7 @@ class TestReseedEngine(unittest.TestCase):
         self.assertEqual(len(self.store.list(status="success")), 1)
 
     def test_target_has_source_hash_skipped(self):
+        """非目标源(qB)的种子已被转移进 TR → 跳过。"""
         src = FakeAdapter(name="tr", torrents=[make_torrent(H1)])
         target = FakeAdapter(name="qb", have={H1})
         engine = self._engine(target, src, FakeMatcher([]))
@@ -155,6 +156,18 @@ class TestReseedEngine(unittest.TestCase):
         rows = self.store.list(status="skipped")
         self.assertEqual(len(rows), 1)
         self.assertIn("已有", rows[0].message)
+
+    def test_target_own_seed_participates(self):
+        """目标下载器自身的做种也参与匹配(不同 infohash 同源种子可共存)。"""
+        cand = make_cand(info_hash="d" * 40)  # 与本地不同的候选 hash
+        target = FakeAdapter(name="qb", torrents=[make_torrent(H1)])
+        src = FakeAdapter(name="tr")
+        engine = self._engine(target, src, FakeMatcher([cand]))
+        stats = engine.run_once()
+        self.assertEqual(stats["matched"], 1)
+        self.assertEqual(stats["injected"], 1)
+        self.assertEqual(len(target.added), 1)
+        self.assertEqual(target.added[0]["save_path"], "/data/tv")
 
     def test_exclude_paths(self):
         src = FakeAdapter(name="tr", torrents=[make_torrent(H1, save_path="/data/tmp/x")])

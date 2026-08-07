@@ -69,10 +69,8 @@ class ReseedEngine:
         for name, adapter in self.adapters.items():
             if budget <= 0:
                 break
-            if adapter is self.target:
-                # 目标下载器自身做种无需辅种:同 infohash 无法在同一客户端重复做种,
-                # 跳过可避免大量无意义的 has_torrent 查询与 skipped 记录污染
-                continue
+            # 注意:目标下载器自身的做种也参与匹配(文件级匹配产出的是不同 infohash
+            # 的同源种子, 可在同一客户端共存做种——TR 内 783 条跨站共存记录为证)
             try:
                 torrents = adapter.list_torrents(state="seeding")
             except Exception as e:  # noqa: BLE001
@@ -93,17 +91,20 @@ class ReseedEngine:
                 rows = self.store.list_by_source(self.target.name, t.hash)
                 if any(r.status in ("pending", "success", "skipped") for r in rows):
                     continue
-                # 目标下载器已有同 hash
-                try:
-                    if self.target.has_torrent(t.hash):
-                        self.store.add(client_id=self.target.name, source_hash=t.hash,
-                                       info_hash=t.hash, directory=str(t.save_path),
-                                       status="skipped", message="目标下载器已有同 hash")
-                        stats["skipped"] += 1
+                # 目标下载器已有同 hash(仅非目标源检查:如 qB 种子已被转移进 TR 则无需再辅;
+                # 目标自身种子必然在目标中, 跳过此检查直接参与匹配——匹配产出是不同
+                # infohash 的同源种子, 与自身共存做种)
+                if adapter is not self.target:
+                    try:
+                        if self.target.has_torrent(t.hash):
+                            self.store.add(client_id=self.target.name, source_hash=t.hash,
+                                           info_hash=t.hash, directory=str(t.save_path),
+                                           status="skipped", message="目标下载器已有同 hash")
+                            stats["skipped"] += 1
+                            continue
+                    except Exception as e:  # noqa: BLE001
+                        logger.error(f"[reseed] 查询目标下载器失败 {t.hash}: {e}")
                         continue
-                except Exception as e:  # noqa: BLE001
-                    logger.error(f"[reseed] 查询目标下载器失败 {t.hash}: {e}")
-                    continue
                 # 匹配
                 try:
                     local_files = adapter.get_torrent_files(t.hash)
