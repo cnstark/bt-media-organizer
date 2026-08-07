@@ -120,6 +120,66 @@ def match_ratio(local_files: List[Tuple[str, int]], cand_files: List[Tuple[str, 
     return len(ls & cs) / len(ls)
 
 
+class SkipSite(Exception):
+    """站点处于流控冷却期, 跳过该站点。"""
+
+
+class RateLimiter:
+    """站点级流控:最小间隔 + 每分钟配额 + 失败冷却 + 全局节流。
+
+    防站点管控(实证各 PT 站对频繁搜索/下载有风控):
+    - min_interval: 同一站点任意两次请求的最小间隔(秒)
+    - per_minute: 同一站点每分钟请求上限
+    - global_interval: 全局(所有站点合计)最小间隔(秒)
+    - cooldown_seconds: 站点请求失败(429/超时/5xx)后冷却时长, 冷却期内跳过该站
+    """
+
+    def __init__(self, min_interval: float = 2.0, per_minute: int = 8,
+                 global_interval: float = 1.0, cooldown_seconds: float = 120.0):
+        self.min_interval = min_interval
+        self.per_minute = per_minute
+        self.global_interval = global_interval
+        self.cooldown_seconds = cooldown_seconds
+        self._last: Dict[str, float] = {}        # key -> 上次请求时间
+        self._window: Dict[str, List[float]] = {}  # key -> 滑动窗口时间戳
+        self._cool_until: Dict[str, float] = {}   # indexer -> 冷却截止时间
+        self._last_global = 0.0
+
+    @staticmethod
+    def _key(kind: str, indexer: str) -> str:
+        return f"{kind}:{indexer}"
+
+    def in_cooldown(self, indexer: str) -> bool:
+        return self._cool_until.get(indexer, 0.0) > time.time()
+
+    def cooldown_site(self, indexer: str) -> None:
+        """站点请求失败 → 进入冷却期。"""
+        self._cool_until[indexer] = time.time() + self.cooldown_seconds
+
+    def acquire(self, kind: str, indexer: str, now: float | None = None) -> float:
+        """等待直到允许请求, 返回实际等待秒数。站点冷却中抛 SkipSite。"""
+        if self.in_cooldown(indexer):
+            raise SkipSite(indexer)
+        now = now if now is not None else time.time()
+        key = self._key(kind, indexer)
+        wait = self.min_interval - (now - self._last.get(key, 0.0))
+        # 滑动窗口配额:满则等到最早请求过期(60s 窗口)
+        window = self._window.setdefault(key, [])
+        cutoff = now - 60.0
+        window[:] = [ts for ts in window if ts > cutoff]
+        if len(window) >= self.per_minute:
+            wait = max(wait, window[0] + 60.0 - now)
+        # 全局节流
+        wait = max(wait, self.global_interval - (now - self._last_global))
+        if wait > 0:
+            time.sleep(wait)
+            now = time.time()
+        self._last[key] = now
+        self._last_global = now
+        self._window.setdefault(key, []).append(now)
+        return wait
+
+
 class Matcher(ABC):
     """匹配器接口(未来可扩展 IYUU 等实现)。"""
 
@@ -140,17 +200,33 @@ class JackettMatcher(Matcher):
         self._client = httpx.Client(
             base_url=conf.url.rstrip("/"), timeout=30.0, follow_redirects=True
         )
-        self._last_request: dict = {}   # indexer -> 上次请求时间
+        # 站点级流控(防管控)
+        self._limiter = RateLimiter(
+            min_interval=conf.per_indexer_delay,
+            per_minute=conf.per_minute,
+            global_interval=conf.global_interval,
+            cooldown_seconds=conf.cooldown_seconds,
+        )
 
-    # ---------------- 限速 ----------------
+    # ---------------- 流控 ----------------
 
-    def _throttle(self, indexer: str) -> None:
-        last = self._last_request.get(indexer, 0.0)
-        gap = time.time() - last
-        wait = self.conf.per_indexer_delay - gap
-        if wait > 0:
-            time.sleep(wait)
-        self._last_request[indexer] = time.time()
+    def _acquire(self, kind: str, indexer: str) -> bool:
+        """等待流控放行;站点冷却中返回 False(调用方跳过该站)。"""
+        try:
+            self._limiter.acquire(kind, indexer)
+            return True
+        except SkipSite:
+            logger.warning(f"[reseed] 站点流控冷却中, 跳过 [{indexer}]")
+            return False
+
+    def _site_from_url(self, url: str) -> str:
+        """从 Jackett 下载链接解析站点 id(形如 /dl/{indexer}/...)。"""
+        path = urlparse(url).path
+        parts = path.split("/")
+        for i, p in enumerate(parts):
+            if p == "dl" and i + 1 < len(parts):
+                return parts[i + 1]
+        return "__unknown__"
 
     # ---------------- 匹配 ----------------
 
@@ -161,6 +237,8 @@ class JackettMatcher(Matcher):
         for indexer in self.conf.indexers:
             if len(results) >= candidates_limit:
                 break
+            if not self._acquire("search", indexer):
+                continue  # 站点冷却中, 跳过
             downloads = 0  # 本索引器文件比对下载预算计数(必须每索引器重置)
             # 合并所有搜索词的结果, 按 (title, size) 去重(download_url 可能因代理参数
             # 不同而不同, 同一候选会以不同链接重复出现); 空结果重试 1 次容忍站端临时空窗
@@ -214,11 +292,15 @@ class JackettMatcher(Matcher):
     # ---------------- 私有 ----------------
 
     def _search(self, indexer: str, query: str) -> List[Candidate]:
-        self._throttle(indexer)
+        if not self._acquire("search", indexer):
+            raise SkipSite(indexer)
         params = {"apikey": self.conf.api_key, "q": query}
         resp = self._client.get(
             f"/api/v2.0/indexers/{indexer}/results/torznab", params=params
         )
+        if resp.status_code in (429, 403):
+            self._limiter.cooldown_site(indexer)   # 风控/限流 → 冷却该站
+            raise RuntimeError(f"站点风控 [{indexer}]: HTTP {resp.status_code}")
         resp.raise_for_status()
         return self._parse_torznab(resp.content, indexer)
 
@@ -263,8 +345,10 @@ class JackettMatcher(Matcher):
         return self.download(url)
 
     def download(self, url: str) -> Optional[bytes]:
-        """下载候选种子字节(失败重试 2 次)。链接为 Jackett 代理时补 apikey。"""
-        self._throttle("__download__")
+        """下载候选种子字节(失败重试 1 次 + 站点冷却)。链接为 Jackett 代理时补 apikey。"""
+        site = self._site_from_url(url)
+        if not self._acquire("download", site):
+            return None
         if urlparse(url).netloc == urlparse(self.conf.url).netloc:
             sep = "&" if "?" in url else "?"
             if "apikey=" not in url:
@@ -273,11 +357,16 @@ class JackettMatcher(Matcher):
         for attempt in range(2):
             try:
                 resp = self._client.get(url)
+                if resp.status_code in (429, 403):
+                    self._limiter.cooldown_site(site)   # 风控/限流 → 冷却该站
+                    raise RuntimeError(f"站点风控 [{site}]: HTTP {resp.status_code}")
                 resp.raise_for_status()
                 return resp.content
             except Exception as e:  # noqa: BLE001
                 last_err = e
                 if attempt < 1:
                     time.sleep(1.0)
-        logger.warning(f"[reseed] 候选种子下载失败(重试2次): {last_err}")
+        # 持续失败 → 冷却该站, 避免继续打请求触发管控
+        self._limiter.cooldown_site(site)
+        logger.warning(f"[reseed] 候选种子下载失败(重试1次+冷却): {last_err}")
         return None

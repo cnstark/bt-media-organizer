@@ -146,7 +146,10 @@ class JackettConf:
     indexers: List[str] = field(default_factory=list)      # 白名单,必须显式配置
     max_candidates: int = 20
     size_tolerance: float = 0.02
-    per_indexer_delay: float = 2.0
+    per_indexer_delay: float = 2.0     # 同站请求最小间隔(秒)
+    per_minute: int = 8                # 同站每分钟请求上限(防管控)
+    global_interval: float = 1.0       # 全局(所有站合计)最小间隔(秒)
+    cooldown_seconds: float = 120.0    # 站点失败(429/超时)后冷却(秒)
 
 
 @dataclass

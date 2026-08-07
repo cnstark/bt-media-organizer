@@ -94,7 +94,10 @@ reseed:
     indexers: []                # 索引器白名单(必须显式配置,如 ["hhanclub", "hdfans"]);空 = 不辅种
     max_candidates: 20          # 每种子最多候选数
     size_tolerance: 0.02        # 候选大小容差比例(±2%)
-    per_indexer_delay: 2.0      # 每索引器请求间隔(秒),防限速
+    per_indexer_delay: 3.0      # 同站请求最小间隔(秒),防管控
+    per_minute: 8                # 同站每分钟请求上限,防管控
+    global_interval: 1.0       # 全局(所有站合计)最小间隔(秒)
+    cooldown_seconds: 120.0    # 站点失败(429/超时)后冷却(秒),防限速
   exclude_paths: []             # 这些目录内的做种不参与辅种(前缀匹配)
 
 recognize:

@@ -55,7 +55,10 @@ docker compose -f docker-compose.example.yml up -d --build
 - `directories[].category_folder: true` 开启按识别类别自动建子目录(未识别归"未分类");`category_rules` 用 MP 格式自定义规则(如 `{纪录片: {genre_ids: "99"}}`),留空用内置 MP 默认规则
 - `recognize.tmdb`:需 api_key 启用;`api_base` 可换镜像/自建反代;`proxy` 可配代理(留空读系统 HTTPS_PROXY)
 - 转移:见 config.example.yaml 的 `transfer:` 段(来源/目标下载器、删源、自动开始、标记、路径过滤/选择/转换);开启时 `from_client`/`to_client` 必填且不能相等
-- 辅种:见 `reseed:` 段(注入目标、默认暂停、Jackett 地址/密钥/**索引器白名单必填**、大小容差、限速);qB 种子导出无需 `torrent_path`,TR 兜底读取需要
+- 辅种:见 `reseed:` 段(注入目标、默认暂停、Jackett 地址/密钥/**索引器白名单必填**、大小容差);
+  **流控防站点管控**:`per_indexer_delay`(同站最小间隔)、`per_minute`(同站每分钟上限)、
+  `global_interval`(全局节流)、`cooldown_seconds`(站点失败后冷却,冷却期跳过该站);
+  qB 种子导出无需 `torrent_path`,TR 兜底读取需要
 - 环境变量:`BT_MEDIA_CONFIG`(配置文件路径)、`BT_MEDIA_TOKEN`(覆盖 server.token)、`PUID`/`PGID`(Docker 降权)
 
 ## API
