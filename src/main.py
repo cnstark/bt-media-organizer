@@ -21,6 +21,9 @@ from .downloaders import create_adapter
 from .engine import TransferEngine as OrganizeEngine
 from .history import HistoryStore
 from .log import setup_logger
+from .reseed.engine import ReseedEngine
+from .reseed.matcher import JackettMatcher
+from .reseed.store import ReseedStore
 from .transfer.engine import TransferEngine
 
 logger = logging.getLogger("bt-media-organizer")
@@ -70,14 +73,15 @@ def _poll_loop(engine: OrganizeEngine, downloader: str, interval: int, stop: thr
         stop.wait(interval)
 
 
-def _transfer_poll_loop(engine: TransferEngine, interval: int, stop: threading.Event):
-    """转移轮询线程。"""
-    logger.info(f"转移轮询线程已启动: 每 {interval}s")
+def _run_once_loop(engine, interval: int, stop: threading.Event):
+    """通用轮询循环(转移/辅种引擎共用):周期调 run_once。"""
+    name = getattr(engine, "name", type(engine).__name__)
+    logger.info(f"轮询线程已启动: {name} 每 {interval}s")
     while not stop.is_set():
         try:
             engine.run_once()
         except Exception as e:  # noqa: BLE001
-            logger.error(f"转移轮询异常: {e}")
+            logger.error(f"轮询异常[{name}]: {e}")
         stop.wait(interval)
 
 
@@ -124,6 +128,19 @@ def main() -> None:
             transfer_engine = TransferEngine(conf.transfer, from_adapter, to_adapter)
             logger.info(f"转移引擎已初始化: {conf.transfer.from_client} → {conf.transfer.to_client}")
 
+    # 辅种引擎
+    reseed_engine = None
+    if conf.reseed.enabled:
+        if conf.reseed.target_client not in adapters:
+            logger.error("reseed 模块启用但目标下载器适配器创建失败,辅种功能不可用")
+        else:
+            reseed_store = ReseedStore(conf.history.db)
+            reseed_engine = ReseedEngine(
+                conf.reseed, adapters, reseed_store,
+                JackettMatcher(conf.reseed.jackett),
+            )
+            logger.info(f"辅种引擎已初始化: 注入目标={conf.reseed.target_client}")
+
     # 轮询线程
     stop_event = threading.Event()
     pollers = []
@@ -136,16 +153,22 @@ def main() -> None:
             pollers.append(t)
 
     # 转移轮询线程
-    transfer_pollers = []
     if transfer_engine and conf.transfer.poll_interval > 0:
-        t = threading.Thread(target=_transfer_poll_loop,
+        t = threading.Thread(target=_run_once_loop,
                              args=(transfer_engine, conf.transfer.poll_interval, stop_event),
                              name="transfer-poll", daemon=True)
         t.start()
-        transfer_pollers.append(t)
+
+    # 辅种轮询线程
+    if reseed_engine and conf.reseed.poll_interval > 0:
+        t = threading.Thread(target=_run_once_loop,
+                             args=(reseed_engine, conf.reseed.poll_interval, stop_event),
+                             name="reseed-poll", daemon=True)
+        t.start()
 
     # HTTP 服务
-    server = ApiServer(conf, engine, transfer_engine=transfer_engine)
+    server = ApiServer(conf, engine, transfer_engine=transfer_engine,
+                       reseed_engine=reseed_engine)
     server_thread = threading.Thread(target=server.serve_forever,
                                      name="http", daemon=True)
     server_thread.start()
