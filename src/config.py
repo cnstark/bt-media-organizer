@@ -80,12 +80,13 @@ class TransferDirConf:
 @dataclass
 class DownloaderConf:
     name: str = "qb"
-    type: str = "qbittorrent"
+    type: str = "qbittorrent"     # qbittorrent / transmission
     url: str = "http://127.0.0.1:8080"
     username: str = ""
     password: str = ""
     poll_interval: int = 60
     tag: str = "已整理"
+    torrent_path: str = ""        # 种子目录(qB: BT_backup;TR: 兜底读取),转移功能需要
 
 
 @dataclass
@@ -116,6 +117,50 @@ class LogConf:
 
 
 @dataclass
+class PathRuleConf:
+    """路径过滤/选择/转换(IYUU 语义)。"""
+    convert_type: str = "eq"      # eq / sub / add / replace
+    rules: List[tuple] = field(default_factory=list)        # [(源前缀, 目标前缀)]
+    filter_paths: List[str] = field(default_factory=list)  # 排除(前缀匹配)
+    selector_paths: List[str] = field(default_factory=list)  # 仅包含(前缀匹配)
+
+
+@dataclass
+class TransferConf:
+    enabled: bool = False
+    poll_interval: int = 300
+    from_client: str = ""
+    to_client: str = ""
+    delete_source: bool = False
+    auto_start: bool = True
+    marker: str = "empty"         # empty / tag / category
+    path: PathRuleConf = field(default_factory=PathRuleConf)
+
+
+@dataclass
+class JackettConf:
+    url: str = ""
+    api_key: str = ""
+    indexers: List[str] = field(default_factory=list)      # 白名单,必须显式配置
+    max_candidates: int = 20
+    size_tolerance: float = 0.02
+    per_indexer_delay: float = 2.0
+
+
+@dataclass
+class ReseedConf:
+    enabled: bool = False
+    poll_interval: int = 3600
+    target_client: str = ""        # 注入目标下载器(必填,可选任意已配置下载器)
+    auto_start: bool = False        # 默认暂停(校验后由用户开始)
+    check_on_add: bool = False
+    marker: str = "category"       # empty / tag / category
+    matcher: str = "jackett"
+    jackett: JackettConf = field(default_factory=JackettConf)
+    exclude_paths: List[str] = field(default_factory=list)
+
+
+@dataclass
 class Config:
     server: ServerConf = field(default_factory=ServerConf)
     engine: EngineConf = field(default_factory=EngineConf)
@@ -124,6 +169,8 @@ class Config:
     recognize: RecognizeConf = field(default_factory=RecognizeConf)
     history: HistoryConf = field(default_factory=HistoryConf)
     log: LogConf = field(default_factory=LogConf)
+    transfer: TransferConf = field(default_factory=TransferConf)
+    reseed: ReseedConf = field(default_factory=ReseedConf)
 
 
 # ---------------------------------------------------------------- 加载
@@ -162,6 +209,8 @@ def load_config(path: str) -> Config:
 
     cfg.directories = [_from_dict(TransferDirConf, d) for d in raw.get("directories") or []]
     cfg.downloaders = [_from_dict(DownloaderConf, d) for d in raw.get("downloaders") or []]
+    cfg.transfer = _load_transfer(raw.get("transfer"))
+    cfg.reseed = _load_reseed(raw.get("reseed"))
     cfg.recognize = _from_dict(RecognizeConf, raw.get("recognize"))
     cfg.recognize.tmdb = _from_dict(TmdbConf, (raw.get("recognize") or {}).get("tmdb"))
     cfg.history = _from_dict(HistoryConf, raw.get("history"))
@@ -169,6 +218,42 @@ def load_config(path: str) -> Config:
 
     _validate(cfg)
     return cfg
+
+
+def _load_transfer(data: dict) -> TransferConf:
+    conf = _from_dict(TransferConf, data)
+    if data:
+        path_raw = data.get("path") or {}
+        conf.path = _from_dict(PathRuleConf, path_raw)
+        rules = path_raw.get("rules") or []
+        if isinstance(rules, str):
+            conf.path.rules = _parse_rule_text(rules)
+        elif isinstance(rules, list):
+            conf.path.rules = [(str(r[0]), str(r[1])) for r in rules if isinstance(r, (list, tuple)) and len(r) == 2]
+    return conf
+
+
+def _load_reseed(data: dict) -> ReseedConf:
+    conf = _from_dict(ReseedConf, data)
+    if data:
+        conf.jackett = _from_dict(JackettConf, data.get("jackett"))
+    return conf
+
+
+def _parse_rule_text(text: str) -> List[tuple]:
+    """多行规则文本 → [(源前缀, 目标前缀)];'#' 注释,空行跳过,分隔符 '{#**#}'。"""
+    rules: List[tuple] = []
+    for line in text.replace("\r\n", "\n").split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "{#**#}" in line:
+            parts = [p.strip() for p in line.split("{#**#}")]
+            if len(parts) == 2 and parts[0]:
+                rules.append((parts[0], parts[1]))
+        elif line:
+            rules.append((line, ""))  # 仅源前缀(用于 sub)
+    return rules
 
 
 def _validate(cfg: Config) -> None:
@@ -183,10 +268,46 @@ def _validate(cfg: Config) -> None:
             raise ValueError(f"目录 [{d.name}] media_type 非法: {d.media_type}")
         if d.overwrite_mode and d.overwrite_mode not in ("never", "always", "size", "latest"):
             raise ValueError(f"目录 [{d.name}] overwrite_mode 非法: {d.overwrite_mode}")
+    names = set()
     for dl in cfg.downloaders:
-        if dl.type != "qbittorrent":
-            raise ValueError(f"暂不支持的下载器类型: {dl.type}(目前仅 qbittorrent)")
+        if dl.type not in ("qbittorrent", "transmission"):
+            raise ValueError(f"不支持的下载器类型: {dl.type}(支持 qbittorrent/transmission)")
         if not dl.url:
             raise ValueError(f"下载器 [{dl.name}] 缺少 url")
+        if dl.name in names:
+            raise ValueError(f"下载器名称重复: {dl.name}")
+        names.add(dl.name)
+    # 转移配置校验
+    t = cfg.transfer
+    if t.enabled:
+        if not t.from_client or not t.to_client:
+            raise ValueError("transfer.enabled=true 但未配置 from_client/to_client")
+        if t.from_client == t.to_client:
+            raise ValueError("transfer 的来源下载器和目标下载器不能相等")
+        for key in (t.from_client, t.to_client):
+            if key not in names:
+                raise ValueError(f"transfer 引用了未配置的下载器: {key}")
+        if t.marker not in ("empty", "tag", "category"):
+            raise ValueError(f"transfer.marker 非法: {t.marker}")
+        if t.path.convert_type not in ("eq", "sub", "add", "replace"):
+            raise ValueError(f"transfer.path.convert_type 非法: {t.path.convert_type}")
+        inter = set(t.path.filter_paths) & set(t.path.selector_paths)
+        if inter:
+            raise ValueError(f"transfer 过滤器与选择器存在交集: {','.join(sorted(inter))}")
+    # 辅种配置校验
+    r = cfg.reseed
+    if r.enabled:
+        if not r.target_client:
+            raise ValueError("reseed.enabled=true 但未配置 target_client")
+        if r.target_client not in names:
+            raise ValueError(f"reseed.target_client 未配置的下载器: {r.target_client}")
+        if r.matcher != "jackett":
+            raise ValueError(f"reseed.matcher 暂不支持: {r.matcher}")
+        if not r.jackett.url or not r.jackett.api_key:
+            raise ValueError("reseed.enabled=true 但 jackett.url/api_key 未配置")
+        if not r.jackett.indexers:
+            raise ValueError("reseed 索引器白名单为空: 必须显式配置 jackett.indexers")
+        if r.marker not in ("empty", "tag", "category"):
+            raise ValueError(f"reseed.marker 非法: {r.marker}")
     if cfg.recognize.tmdb.enabled and not cfg.recognize.tmdb.api_key:
         raise ValueError("recognize.tmdb.enabled=true 但未配置 api_key")

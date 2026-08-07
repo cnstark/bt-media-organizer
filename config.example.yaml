@@ -45,7 +45,7 @@ directories:                    # 下载目录 → 媒体库映射,按顺序匹�
     category_rules: {}          # 可选,MP 格式(如: 纪录片: {genre_ids: "99"});留空用内置 MP 默认规则
     monitor: true
 
-downloaders:                    # 目前仅支持 qbittorrent
+downloaders:                    # 支持 qbittorrent / transmission
   - name: qb
     type: qbittorrent
     url: "http://127.0.0.1:8080"
@@ -53,6 +53,49 @@ downloaders:                    # 目前仅支持 qbittorrent
     password: "adminadmin"
     poll_interval: 60           # 秒;0 = 关闭轮询
     tag: "已整理"               # 整理完成标签(对账依据)
+    torrent_path: ""            # 种子目录(转移功能用;qB=BT_backup 绝对路径,如 /config/qBittorrent/BT_backup)
+
+  - name: tr
+    type: transmission
+    url: "http://127.0.0.1:9091"
+    username: ""
+    password: ""
+    poll_interval: 0            # 0 = 不参与整理轮询
+    tag: "已整理"
+    torrent_path: ""            # TR 种子目录(转移读取种子文件的兜底路径)
+
+# ---------- 功能 2:转移(可选,enabled=true 时 from/to 必填且不能相等) ----------
+transfer:
+  enabled: false
+  poll_interval: 300            # 秒;0 = 关闭
+  from_client: qb               # 来源下载器(做种所在)
+  to_client: tr                 # 目标下载器(转移去向)
+  delete_source: false          # 转移成功后删除来源种子(只删种子不删数据);风险项,首次请勿开启
+  auto_start: true              # 转移后是否自动开始做种;false = 添加后暂停
+  marker: empty                 # 标记规则: empty / tag / category(如 tag=已转移)
+  path:
+    convert_type: eq            # 路径转换: eq(相等) / sub(减前缀) / add(加前缀) / replace(替换)
+    rules: ""                  # 多行文本,每行 "源前缀{#**#}目标前缀";为空=eq
+    filter_paths: []            # 排除目录(前缀匹配),命中不转移
+    selector_paths: []          # 仅转移命中目录(前缀匹配);与 filter 不得有交集
+
+# ---------- 功能 3:辅种(可选,enabled=true 时 jackett 配置与白名单必填) ----------
+reseed:
+  enabled: false
+  poll_interval: 3600           # 秒;0 = 关闭
+  target_client: qb             # 注入目标下载器(可选任意已配置下载器)
+  auto_start: false             # 注入后是否自动开始做种;默认 false = 暂停(校验后手动开始)
+  check_on_add: false           # 注入后是否发 recheck 校验命令(qB)
+  marker: category              # 标记规则: empty / tag / category
+  matcher: jackett
+  jackett:
+    url: "http://127.0.0.1:9117"
+    api_key: ""
+    indexers: []                # 索引器白名单(必须显式配置,如 ["hhanclub", "hdfans"]);空 = 不辅种
+    max_candidates: 20          # 每种子最多候选数
+    size_tolerance: 0.02        # 候选大小容差比例(±2%)
+    per_indexer_delay: 2.0      # 每索引器请求间隔(秒),防限速
+  exclude_paths: []             # 这些目录内的做种不参与辅种(前缀匹配)
 
 recognize:
   tmdb:
