@@ -91,7 +91,8 @@ reseed:
   jackett:
     url: "http://127.0.0.1:9117"
     api_key: ""
-    indexers: []                # 索引器白名单(必须显式配置,如 ["hhanclub", "hdfans"]);空 = 不辅种
+    indexers: ["btschool", "cspt", "carpt", "hddolby", "hdarea", "hdfans", "mteamtp", "panda", "pttime", "tjupt", "ubits", "zmpt"]   # 索引器白名单(Jackett 已配置的全部 12 个)
+    # 留空示例: []                # 空 = 不辅种(必须显式配置)
     max_candidates: 20          # 每种子最多候选数
     size_tolerance: 0.02        # 候选大小容差比例(±2%)
     per_indexer_delay: 3.0      # 同站请求最小间隔(秒),防管控

@@ -36,11 +36,18 @@ RETRY_SLEEP = 3
 # tracker 域名关键词 → Jackett 索引器 id(辅种跳过已覆盖站点用; 可用配置覆盖)
 DEFAULT_TRACKER_MAP = {
     "btschool": "btschool",
+    "cspt": "cspt",
+    "carpt": "carpt",
     "hddolby": "hddolby",
     "hdarea": "hdarea",
     "hdfans": "hdfans",
     "m-team": "mteamtp",
     "mteamtp": "mteamtp",
+    "pandapt": "panda",
+    "pttime": "pttime",
+    "tjupt": "tjupt",
+    "ubits": "ubits",
+    "zmpt": "zmpt",
 }
 
 # 种子名中的标签 token(搜索词精简时剔除;组名在 '-' 之后一并截掉)
