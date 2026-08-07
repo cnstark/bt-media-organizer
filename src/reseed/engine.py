@@ -106,7 +106,15 @@ class ReseedEngine:
                     continue
                 # 匹配
                 try:
-                    cands = self.matcher.match(t, self.conf.jackett.max_candidates)
+                    local_files = adapter.get_torrent_files(t.hash)
+                except Exception as e:  # noqa: BLE001
+                    logger.error(f"[reseed] 获取本地文件列表失败 {t.hash}: {e}")
+                    continue
+                if not local_files:
+                    logger.warning(f"[reseed] 本地文件列表为空,跳过匹配 {t.hash}")
+                    continue
+                try:
+                    cands = self.matcher.match(t, local_files, self.conf.jackett.max_candidates)
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"[reseed] 匹配失败 {t.hash} {t.name}: {e}")
                     continue

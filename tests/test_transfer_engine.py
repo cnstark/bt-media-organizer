@@ -49,6 +49,9 @@ class FakeAdapter(DownloaderAdapter):
         data = encode({b"info": {b"name": b"x"}})
         return data if hash_ in {t.hash for t in self.torrents} else None
 
+    def get_torrent_files(self, hash_):
+        return [("x", 100)]
+
     def add_torrent(self, data, save_path, *, paused, category="", tags=None, skip_checking=False):
         self.added.append({"data": data, "save_path": save_path, "paused": paused,
                            "category": category, "tags": tags})

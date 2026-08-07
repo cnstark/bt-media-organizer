@@ -133,6 +133,18 @@ class TransmissionAdapter(DownloaderAdapter):
             logger.warning(f"[{self.name}] 读取种子文件失败 {path}: {e}")
             return None
 
+    def get_torrent_files(self, hash: str) -> List[tuple]:
+        """种子文件列表(RPC files 字段,跨主机可用)。"""
+        try:
+            items = self._torrent_get(["hashString", "files"], ids=[hash])
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"[{self.name}] 获取种子文件列表失败: {e}")
+            return []
+        if not items:
+            return []
+        files = items[0].get("files") or []
+        return [(f.get("name") or "", int(f.get("length") or 0)) for f in files]
+
     def add_torrent(self, data: Union[bytes, str], save_path: str, *,
                     paused: bool, category: str = "", tags: Optional[List[str]] = None,
                     skip_checking: bool = False) -> Tuple[bool, str]:

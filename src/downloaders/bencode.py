@@ -141,3 +141,41 @@ def fastresume_tracker(fastresume_bytes: bytes) -> Optional[str]:
     if isinstance(first, list) and first and isinstance(first[0], bytes):
         return first[0].decode("utf-8", "replace")
     return None
+
+
+def file_list(torrent_bytes: bytes) -> List[Tuple[str, int]]:
+    """种子文件列表 [(相对路径, 大小)]。
+
+    - 单文件: [('name', length)]
+    - 多文件: files[] 的 path 用 / 拼接
+    用于辅种文件级匹配(不同站重新打包的同源种子, infohash 不同但文件一致)。
+    """
+    try:
+        d = decode(torrent_bytes)
+    except ValueError:
+        return []
+    if not isinstance(d, dict):
+        return []
+    info = d.get(b"info")
+    if not isinstance(info, dict):
+        return []
+    length = info.get(b"length")
+    name = info.get(b"name", b"")
+    name_s = name.decode("utf-8", "replace") if isinstance(name, bytes) else str(name)
+    if isinstance(length, int):
+        return [(name_s, length)]
+    files = info.get(b"files")
+    if isinstance(files, list):
+        rs: List[Tuple[str, int]] = []
+        for f in files:
+            if not isinstance(f, dict):
+                continue
+            flen = f.get(b"length")
+            fpath = f.get(b"path")
+            if not isinstance(flen, int) or not isinstance(fpath, list):
+                continue
+            parts = [p.decode("utf-8", "replace") if isinstance(p, bytes) else str(p)
+                     for p in fpath]
+            rs.append(("/".join(parts), flen))
+        return rs
+    return []

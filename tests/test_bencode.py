@@ -3,8 +3,8 @@ import hashlib
 import unittest
 
 from src.downloaders.bencode import (
-    decode, encode, extract_announce, fastresume_tracker, info_dict_raw, info_hash,
-    patch_announce,
+    decode, encode, extract_announce, fastresume_tracker, file_list, info_dict_raw,
+    info_hash, patch_announce,
 )
 
 
@@ -60,6 +60,25 @@ class TestBencode(unittest.TestCase):
         self.assertEqual(fastresume_tracker(fr), "http://a.example/ann")
         self.assertIsNone(fastresume_tracker(encode({b"trackers": []})))
         self.assertIsNone(fastresume_tracker(b"not bencode"))
+
+    def test_file_list_single(self):
+        data = encode({b"info": {b"name": b"Movie.mkv", b"length": 100, b"piece length": 1}})
+        self.assertEqual(file_list(data), [("Movie.mkv", 100)])
+
+    def test_file_list_multi(self):
+        info = {
+            b"name": b"Show", b"piece length": 1,
+            b"files": [
+                {b"length": 10, b"path": [b"Show", b"S01E01.mkv"]},
+                {b"length": 5, b"path": [b"Show", b"Subs", b"S01E01.zh.srt"]},
+            ],
+        }
+        data = encode({b"info": info})
+        self.assertEqual(file_list(data), [("Show/S01E01.mkv", 10), ("Show/Subs/S01E01.zh.srt", 5)])
+
+    def test_file_list_invalid(self):
+        self.assertEqual(file_list(b"not bencode"), [])
+        self.assertEqual(file_list(encode({b"info": {}})), [])
 
 
 if __name__ == "__main__":

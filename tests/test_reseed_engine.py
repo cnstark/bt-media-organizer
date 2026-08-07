@@ -21,7 +21,8 @@ def make_torrent(hash_: str, save_path: str = "/data/tv") -> TorrentInfo:
 class FakeAdapter:
     """假下载器:有做种列表,可注入。"""
 
-    def __init__(self, name="qb", torrents=None, have=None, fail_inject=False):
+    def __init__(self, name="qb", torrents=None, have=None, fail_inject=False,
+                 files=None):
         self.name = name
         self.conf = type("C", (), {"torrent_path": ""})()
         self.torrents = torrents or []
@@ -29,6 +30,7 @@ class FakeAdapter:
         self.added = []
         self.checked = []
         self.fail_inject = fail_inject
+        self.files = files or [("Movie.mkv", 1000)]   # 种子文件列表
 
     def list_torrents(self, state="all"):
         if state == "seeding":
@@ -37,6 +39,9 @@ class FakeAdapter:
 
     def has_torrent(self, hash_):
         return hash_ in self.have
+
+    def get_torrent_files(self, hash_):
+        return list(self.files)
 
     def add_torrent(self, data, save_path, *, paused, category="", tags=None, skip_checking=False):
         if self.fail_inject:
@@ -57,7 +62,7 @@ class FakeMatcher(Matcher):
         self.candidates = candidates or []
         self.fail_download = fail_download
 
-    def match(self, torrent, candidates_limit):
+    def match(self, torrent, local_files, candidates_limit):
         return list(self.candidates)[:candidates_limit]
 
     def download(self, url):

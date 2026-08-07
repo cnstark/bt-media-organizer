@@ -141,8 +141,7 @@ class QBittorrentAdapter(DownloaderAdapter):
 
         优先 qB API torrents/export(跨主机可用);BT_backup 读盘兜底
         (缺失且 v4.4+ infohash_v1 不同则用 v1 重试)。
-        """
-        # 主路径:API 导出(不依赖本地文件系统)
+        """        # 主路径:API 导出(不依赖本地文件系统)
         if self._login():
             try:
                 resp = self._client.get("/api/v2/torrents/export", params={"hash": hash})
@@ -170,6 +169,13 @@ class QBittorrentAdapter(DownloaderAdapter):
                 continue
         logger.warning(f"[{self.name}] 种子文件不存在(BT_backup): {base} 候选: {candidates}")
         return None
+
+    def get_torrent_files(self, hash: str) -> List[tuple]:
+        """种子文件列表(torrents/files,跨主机可用)。"""
+        data = self._get("/api/v2/torrents/files", hash=hash)
+        if not isinstance(data, list):
+            return []
+        return [(f.get("name") or "", int(f.get("size") or 0)) for f in data]
 
     def add_torrent(self, data: Union[bytes, str], save_path: str, *,
                     paused: bool, category: str = "", tags: Optional[List[str]] = None,

@@ -1,23 +1,66 @@
-"""辅种匹配器:Matcher 接口 + Jackett 实现(Torznab 搜索 → 大小容差 → infohash 比对)。"""
+"""辅种匹配器:Matcher 接口 + Jackett 实现(Torznab 搜索 → 大小容差 → 文件级匹配)。
+
+匹配模型(IYUU 实证):不同 PT 站对同一发布重新打包, infohash 不同但文件列表一致。
+因此不做 infohash 精确比对,而是下载候选种子解析文件列表,与本地种子文件列表
+做同名同大小文件占比比对(≥ 阈值即命中),注入后下载器校验共存做种。
+"""
 from __future__ import annotations
 
 import logging
+import re
 import time
 import xml.etree.ElementTree as ET
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from urllib.parse import urlencode, urlparse
 
 import httpx
 
 from ..config import JackettConf
 from ..downloaders.base import TorrentInfo
-from ..downloaders.bencode import info_hash
+from ..downloaders.bencode import file_list
 
 logger = logging.getLogger("bt-media-organizer.reseed.matcher")
 
 _TORZNAB_NS = "{http://torznab.com/schemas/2015/feed}"
+
+# 文件级匹配阈值:本地文件命中比例 ≥ 该值视为同源(容忍候选多出 sample/nfo 等)
+MATCH_RATIO_THRESHOLD = 0.9
+
+# 种子名中的标签 token(搜索词精简时剔除;组名在 '-' 之后一并截掉)
+_TAG_TOKENS = {
+    "2160p", "1080p", "720p", "4k", "uhd", "60fps", "120fps", "web", "web-dl",
+    "webdl", "bluray", "blu-ray", "remux", "hdrip", "bdrip", "webrip", "hdr",
+    "hdr10", "hdr10+", "dv", "dolby", "vision", "hevc", "h265", "h264", "x265",
+    "x264", "10bit", "8bit", "ddp5.1", "ddp", "ac3", "aac", "flac", "dts",
+    "dts-hd", "truehd", "atmos", "multi", "2audio", "3audio", "imax", "hq",
+    "repack", "proper", "extended", "remastered", "collection", "complete",
+    "cmct", "diy", "dsnp", "nfweb", "fhd", "uhd", "2160", "1080", "sdr",
+}
+_YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+
+
+def build_search_queries(name: str) -> List[str]:
+    """由完整种子名生成搜索词候选(精简标题, 站内搜索对长名支持差)。
+
+    策略: 截掉 '-' 后的组名 → 剔除标签 token → 保留标题 token + 年份。
+    例: '长安三万里.Chang.An.2023.60FPS.2160p.WEB-DL.H265.10bit.DDP5.1-OurTV'
+        → ['长安三万里 Chang An 2023']
+    """
+    base = name.split("-")[0] if "-" in name else name
+    keep: List[str] = []
+    for tok in base.replace(".", " ").split():
+        if tok.lower().strip() in _TAG_TOKENS:
+            continue
+        keep.append(tok)
+    m = _YEAR_RE.search(name)
+    query = " ".join(keep)
+    if not query:
+        return [name]
+    if m and m.group(0) not in query:
+        query = f"{query} {m.group(0)}"
+    return [query]
 
 
 @dataclass
@@ -29,16 +72,32 @@ class Candidate:
     title: str
     size: int
     download_url: str
-    info_hash: str = ""   # Torznab 直接返回时非空
+    info_hash: str = ""   # Torznab 直接返回时非空(仅用于同 hash 快速命中/幂等)
     seeders: int = 0
+
+
+def match_ratio(local_files: List[Tuple[str, int]], cand_files: List[Tuple[str, int]]) -> float:
+    """文件级匹配度:本地文件在候选中的同名(忽略目录)同大小占比(0~1)。
+
+    实证:跨站重新打包的同源种子, 文件名与大小完全一致, 差异主要在目录结构
+    (如本地 'OurTV/x.mp4' vs 候选 'x.mp4'), 因此按 basename+size 匹配。
+    """
+    if not local_files:
+        return 0.0
+    ls = {(p.rsplit("/", 1)[-1], s) for p, s in local_files if p}
+    cs = {(p.rsplit("/", 1)[-1], s) for p, s in cand_files if p}
+    if not ls:
+        return 0.0
+    return len(ls & cs) / len(ls)
 
 
 class Matcher(ABC):
     """匹配器接口(未来可扩展 IYUU 等实现)。"""
 
     @abstractmethod
-    def match(self, torrent: TorrentInfo, candidates_limit: int) -> List[Candidate]:
-        """按标题+大小找同 infohash 的候选。"""
+    def match(self, torrent: TorrentInfo, local_files: List[Tuple[str, int]],
+              candidates_limit: int) -> List[Candidate]:
+        """按标题+大小+文件列表找同源候选。"""
 
     @abstractmethod
     def download(self, url: str) -> Optional[bytes]:
@@ -65,35 +124,45 @@ class JackettMatcher(Matcher):
 
     # ---------------- 匹配 ----------------
 
-    def match(self, torrent: TorrentInfo, candidates_limit: int) -> List[Candidate]:
+    def match(self, torrent: TorrentInfo, local_files: List[Tuple[str, int]],
+              candidates_limit: int) -> List[Candidate]:
         results: List[Candidate] = []
+        queries = build_search_queries(torrent.name)
         for indexer in self.conf.indexers:
             if len(results) >= candidates_limit:
                 break
-            try:
-                items = self._search(indexer, torrent.name)
-            except Exception as e:  # noqa: BLE001
-                logger.warning(f"[reseed] 索引器搜索失败 {indexer}: {e}")
-                continue
+            items: List[Candidate] = []
+            for query in queries:
+                try:
+                    items = self._search(indexer, query)
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[reseed] 索引器搜索失败 {indexer}: {e}")
+                    items = []
+                if items:
+                    break  # 精简词已命中;完整词仅作回退
             for item in items:
                 if len(results) >= candidates_limit:
                     break
                 # 大小容差过滤
                 if not self._size_ok(item.size, torrent.size):
                     continue
-                # infohash 比对
-                if item.info_hash:
-                    if item.info_hash.lower() != torrent.hash.lower():
+                # 同 infohash 快速命中(原样转载的情况,零下载)
+                if item.info_hash and item.info_hash.lower() == torrent.hash.lower():
+                    results.append(item)
+                    continue
+                # 文件级匹配:下载候选种子,解析文件列表与本地比对
+                try:
+                    data = self._download(item.download_url)
+                    if not data:
                         continue
-                else:
-                    # 无 infohash 属性 → 下载候选种子本地比对
-                    try:
-                        data = self._download(item.download_url)
-                        if data is None or info_hash(data) != torrent.hash:
-                            continue
-                    except Exception as e:  # noqa: BLE001
-                        logger.warning(f"[reseed] 候选种子校验失败 {item.download_url}: {e}")
+                    cand_files = file_list(data)
+                    if not cand_files:
                         continue
+                    if match_ratio(local_files, cand_files) < MATCH_RATIO_THRESHOLD:
+                        continue
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(f"[reseed] 候选种子文件比对失败 {item.download_url}: {e}")
+                    continue
                 results.append(item)
         return results
 

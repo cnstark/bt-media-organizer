@@ -60,6 +60,10 @@ class DownloaderAdapter(ABC):
         """读取种子文件字节(转移用)。取不到返回 None。"""
 
     @abstractmethod
+    def get_torrent_files(self, hash: str) -> List[tuple]:
+        """种子文件列表 [(相对路径, 大小)](辅种文件级匹配用)。"""
+
+    @abstractmethod
     def add_torrent(self, data: Union[bytes, str], save_path: str, *,
                     paused: bool, category: str = "", tags: Optional[List[str]] = None,
                     skip_checking: bool = False) -> Tuple[bool, str]:
