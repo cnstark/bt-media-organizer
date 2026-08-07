@@ -19,7 +19,7 @@ import httpx
 
 from ..config import JackettConf
 from ..downloaders.base import TorrentInfo
-from ..downloaders.bencode import file_list
+from ..downloaders.bencode import file_list, info_hash
 
 logger = logging.getLogger("bt-media-organizer.reseed.matcher")
 
@@ -336,6 +336,10 @@ class JackettMatcher(Matcher):
                         continue
                     if match_ratio(local_files, cand_files) < MATCH_RATIO_THRESHOLD:
                         continue
+                    # 填充真实 infohash:Torznab 无 infohash 属性时为空串, 若不带真实
+                    # hash 入队会导致不同站候选共用 "" 互相覆盖(幂等误判已处理)
+                    if not item.info_hash:
+                        item.info_hash = info_hash(data)
                 except Exception as e:  # noqa: BLE001
                     logger.warning(f"[reseed] 候选种子文件比对失败 {item.download_url}: {e}")
                     continue

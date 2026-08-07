@@ -117,11 +117,12 @@ class TestJackettMatcher(unittest.TestCase):
         # 本地有两文件,候选只有 mkv(单文件种) → 命中率 0.5 < 0.9
         t = make_torrent_with_files(LOCAL_FILES)
         self.assertEqual(m.match(t, LOCAL_FILES, 10), [])
-        # 本地只有 mkv → 命中
+        # 本地只有 mkv → 命中,且候选带真实 infohash(修复: 无 attr 时填充)
+        from src.downloaders.bencode import info_hash as ih
         t2 = make_torrent_with_files([("Movie.2024.1080p.mkv", 1000)])
         cands = m.match(t2, [("Movie.2024.1080p.mkv", 1000)], 10)
         self.assertEqual(len(cands), 1)
-        self.assertEqual(cands[0].info_hash, "")
+        self.assertEqual(cands[0].info_hash, ih(torrent_bytes))
 
     def test_size_tolerance(self):
         def handler(request):
