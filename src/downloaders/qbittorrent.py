@@ -137,9 +137,23 @@ class QBittorrentAdapter(DownloaderAdapter):
         return torrents
 
     def get_torrent_file(self, hash: str) -> Optional[bytes]:
-        """BT_backup/{hash}.torrent;缺失且 v4.4+ infohash_v1 不同则用 v1 重试。"""
+        """获取种子文件字节。
+
+        优先 qB API torrents/export(跨主机可用);BT_backup 读盘兜底
+        (缺失且 v4.4+ infohash_v1 不同则用 v1 重试)。
+        """
+        # 主路径:API 导出(不依赖本地文件系统)
+        if self._login():
+            try:
+                resp = self._client.get("/api/v2/torrents/export", params={"hash": hash})
+                if resp.status_code == 200 and resp.content:
+                    return resp.content
+                logger.warning(f"[{self.name}] torrents/export 失败: {resp.status_code}")
+            except httpx.HTTPError as e:
+                logger.warning(f"[{self.name}] torrents/export 异常: {e}")
+        # 兜底:读 BT_backup 磁盘文件
         if not self.conf.torrent_path:
-            logger.warning(f"[{self.name}] 未配置 torrent_path,无法读取种子文件: {hash}")
+            logger.warning(f"[{self.name}] 未配置 torrent_path,无法读盘兜底: {hash}")
             return None
         base = Path(self.conf.torrent_path)
         candidates = [hash]
