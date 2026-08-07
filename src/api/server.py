@@ -4,6 +4,8 @@
 """
 from __future__ import annotations
 
+import base64
+import hashlib
 import hmac
 import json
 import logging
@@ -100,6 +102,8 @@ class _Handler(BaseHTTPRequestHandler):
         body = self._read_body()
         if path == "/api/v1/transfer":
             self._transfer(body)
+        elif path == "/api/v1/download":
+            self._download(body)
         elif path == "/api/v1/poll":
             self._poll(body)
         elif path == "/api/v1/transfer/run":
@@ -159,6 +163,104 @@ class _Handler(BaseHTTPRequestHandler):
     def _poll(self, body: dict) -> None:
         data = self.engine.poll_once(downloader=body.get("downloader"))
         self._send(200, _json({"code": 0, "data": data}))
+
+    def _download(self, body: dict) -> None:
+        """统一下载入口:接收种子链接(magnet/http)或种子文件字节(base64),
+        用 ptpilot 自身配置的下载器添加任务。
+
+        找片侧(搜索 skill)只需解析出种子链接/字节,不需要持有任何下载器配置;
+        下载器增删、鉴权、路径全由本服务统一管理。
+
+        请求体:
+          downloader  下载器名(可选,默认第一个已配置下载器)
+          save_path   保存路径(可选,默认下载器默认路径)
+          url         种子链接(magnet: / http(s):);与 torrent 二选一
+          torrent     .torrent 文件字节的 base64;与 url 二选一
+          category    分类(可选)
+          tags        标签列表(可选)
+          paused      是否暂停(默认 False 立即开始)
+          skip_checking 跳过校验(默认 False)
+        """
+        adapter = self.engine._resolve_adapter(body.get("downloader"))
+        if adapter is None:
+            self._send(200, _json({"code": 1, "message": "下载器不可用:未配置 downloaders 或指定下载器不存在"}))
+            return
+        url = str(body.get("url") or "").strip()
+        torrent_b64 = str(body.get("torrent") or "").strip()
+        if not url and not torrent_b64:
+            self._send(400, _json({"code": 400, "message": "缺少 url 或 torrent"}))
+            return
+        if url and not (url.startswith("http://") or url.startswith("https://") or url.startswith("magnet:")):
+            self._send(400, _json({"code": 400, "message": "url 必须是 http(s) 或 magnet 链接"}))
+            return
+
+        data = base64.b64decode(torrent_b64) if torrent_b64 else url
+        info_hash = ""
+        if isinstance(data, bytes):
+            try:
+                from ..downloaders.bencode import info_dict_raw
+                info_hash = hashlib.sha1(info_dict_raw(data)).hexdigest()
+            except Exception:  # noqa: BLE001
+                info_hash = ""
+            # 幂等:同 hash 已在下载器中则直接返回
+            if info_hash and adapter.has_torrent(info_hash):
+                self._send(200, _json({"code": 0, "message": "已在下载器中", "data": {
+                    "status": "already_present", "downloader": adapter.name,
+                    "info_hash": info_hash, "save_path": body.get("save_path") or "",
+                }}))
+                return
+
+        ok, message = adapter.add_torrent(
+            data,
+            body.get("save_path") or "",
+            paused=bool(body.get("paused")),
+            category=body.get("category") or "",
+            tags=body.get("tags") or None,
+            skip_checking=bool(body.get("skip_checking")),
+        )
+        if not ok:
+            self._send(200, _json({"code": 1, "message": message or "添加失败", "data": {
+                "status": "failed", "downloader": adapter.name,
+                "info_hash": info_hash or "", "save_path": body.get("save_path") or "",
+            }}))
+            return
+
+        # 尽量取回新任务信息(qB 5.x add 响应带 added_torrent_ids)
+        if not info_hash:
+            info_hash = self._hash_from_add_message(message)
+        torrent = None
+        if info_hash:
+            try:
+                for t in adapter.list_torrents():
+                    if t.hash == info_hash:
+                        torrent = t
+                        break
+            except Exception:  # noqa: BLE001
+                torrent = None
+        data_out: dict = {
+            "status": "added", "downloader": adapter.name,
+            "info_hash": info_hash or "", "save_path": body.get("save_path") or "",
+            "paused": bool(body.get("paused")), "message": message or "ok",
+        }
+        if torrent is not None:
+            data_out["name"] = torrent.name
+            data_out["state"] = torrent.state
+            data_out["size"] = torrent.size
+        self._send(200, _json({"code": 0, "message": "ok", "data": data_out}))
+
+    @staticmethod
+    def _hash_from_add_message(message: str) -> str:
+        """qB 5.x torrents/add 成功响应为 JSON,含 added_torrent_ids,尽量解析 infohash。"""
+        if not message:
+            return ""
+        try:
+            data = json.loads(message)
+        except ValueError:
+            return ""
+        ids = data.get("added_torrent_ids") if isinstance(data, dict) else None
+        if isinstance(ids, list) and ids:
+            return str(ids[0]).lower()
+        return ""
 
     def _transfer_run(self) -> None:
         """手动触发一次转移扫描。"""
