@@ -20,6 +20,10 @@ def setup_logger(conf: LogConf) -> logging.Logger:
         "%(asctime)s [%(levelname)s] %(name)s: %(message)s", "%Y-%m-%d %H:%M:%S"
     )
 
+    # 抑制 httpx 的 INFO 请求日志(URL 含 apikey 等敏感参数,避免泄露)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+
     sh = logging.StreamHandler(sys.stdout)
     sh.setFormatter(fmt)
     logger.addHandler(sh)

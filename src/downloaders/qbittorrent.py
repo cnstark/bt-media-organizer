@@ -194,8 +194,17 @@ class QBittorrentAdapter(DownloaderAdapter):
             else:
                 params["urls"] = data
                 resp = self._client.post("/api/v2/torrents/add", data=params)
-            if resp.status_code == 200 and "Ok" in resp.text:
-                return True, resp.text.strip()
+            # 成功判定:旧版返回 200 "Ok.";qB 5.x 返回 200 JSON {"added_torrent_ids":[...]}
+            if resp.status_code == 200:
+                text = resp.text.strip()
+                if "Ok" in text:
+                    return True, text
+                try:
+                    body = resp.json()
+                except ValueError:
+                    body = None
+                if isinstance(body, dict) and (body.get("added_torrent_ids") or (body.get("success_count") or 0) > 0):
+                    return True, text[:200]
             logger.error(f"[{self.name}] torrents/add 失败: {resp.status_code} {resp.text[:200]}")
             return False, resp.text[:200] or f"HTTP {resp.status_code}"
         except httpx.HTTPError as e:
