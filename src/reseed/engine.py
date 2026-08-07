@@ -69,6 +69,10 @@ class ReseedEngine:
         for name, adapter in self.adapters.items():
             if budget <= 0:
                 break
+            if adapter is self.target:
+                # 目标下载器自身做种无需辅种:同 infohash 无法在同一客户端重复做种,
+                # 跳过可避免大量无意义的 has_torrent 查询与 skipped 记录污染
+                continue
             try:
                 torrents = adapter.list_torrents(state="seeding")
             except Exception as e:  # noqa: BLE001
