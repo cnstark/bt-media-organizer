@@ -127,9 +127,9 @@ class TestJackettMatcher(unittest.TestCase):
     def test_size_tolerance(self):
         def handler(request):
             return httpx.Response(200, content=torznab_xml([
-                {"title": "A", "size": 1200, "link": "http://s/1",
+                {"title": "Movie.2024.1080p", "size": 1200, "link": "http://s/1",
                  "attrs": [("infohash", "h1")]},     # 超容差(20%)
-                {"title": "B", "size": 1030, "link": "http://s/2",
+                {"title": "Movie.2024.1080p", "size": 1030, "link": "http://s/2",
                  "attrs": [("infohash", "h2")]},     # 3% 容差内
             ]))
 
@@ -138,6 +138,18 @@ class TestJackettMatcher(unittest.TestCase):
         cands = m.match(t, LOCAL_FILES, 10)
         # B 的 infohash 与本地不同 → 需文件比对 → 下载响应为空 → 丢弃;A 大小超容差丢弃
         self.assertEqual(cands, [])
+
+    def test_strict_name_mismatch_skipped(self):
+        """严格限制: 候选名称与本地不同 → 即使大小一致也不辅。"""
+        def handler(request):
+            return httpx.Response(200, content=torznab_xml([{
+                "title": "Spider Man No Way Home 2021",   # 名称不同(空格 vs 连字符)
+                "size": 1000, "link": "http://s/1", "attrs": [],
+            }]))
+
+        m = make_matcher(handler, indexers=["siteA"])
+        t = make_torrent_with_files(LOCAL_FILES)
+        self.assertEqual(m.match(t, LOCAL_FILES, 10), [])
 
     def test_whitelist_only(self):
         paths = []

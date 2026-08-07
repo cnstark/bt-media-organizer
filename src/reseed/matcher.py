@@ -316,6 +316,11 @@ class JackettMatcher(Matcher):
             for item in items:
                 if len(results) >= candidates_limit:
                     break
+                # 严格限制: 种子名称必须与本地严格相同(跨站重命名/不同版本一律不辅)
+                if item.title != torrent.name:
+                    logger.debug(f"[reseed] [{indexer}] 候选名称不同, 跳过: "
+                                 f"{item.title[:40]} != {torrent.name[:40]}")
+                    continue
                 # 大小容差过滤
                 if not self._size_ok(item.size, torrent.size):
                     continue
