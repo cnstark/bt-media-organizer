@@ -1,6 +1,9 @@
 services:
+  # ⚠️ 部署版:直接拉取 GHCR 镜像,不本地构建。
+  # 镜像发布:推送 v* tag 触发 GitHub Actions 自动构建(见 .github/workflows/docker-image.yml)
+  # 升级:docker compose pull ptpilot && docker compose up -d ptpilot
   ptpilot:
-    build: .
+    image: ghcr.io/cnstark/ptpilot:latest
     container_name: ptpilot
     restart: unless-stopped
     ports:
