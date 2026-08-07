@@ -61,8 +61,10 @@ class FakeMatcher(Matcher):
     def __init__(self, candidates=None, fail_download=False):
         self.candidates = candidates or []
         self.fail_download = fail_download
+        self.match_calls = 0
 
     def match(self, torrent, local_files, candidates_limit):
+        self.match_calls += 1
         return list(self.candidates)[:candidates_limit]
 
     def download(self, url):
@@ -198,6 +200,45 @@ class TestReseedEngine(unittest.TestCase):
         rows = self.store.list(status="failed")
         self.assertEqual(len(rows), 1)
         self.assertIn("下载种子失败", rows[0].message)
+
+    def test_group_dedup_single_match(self):
+        """同名同大小 = 同一发布跨站副本, 整组只匹配一次。"""
+        same = [
+            TorrentInfo(hash=f"a{i}" * 20, name="Same.Movie.2024.1080p",
+                        save_path=Path("/data/tv"), content_path=Path("/data/tv"),
+                        size=1000, seeding=True)
+            for i in range(3)
+        ]
+        other = TorrentInfo(hash="f" * 40, name="Other.Movie.2024.1080p",
+                            save_path=Path("/data/tv"), content_path=Path("/data/tv"),
+                            size=2000, seeding=True)
+        src = FakeAdapter(name="tr", torrents=same + [other])
+        target = FakeAdapter(name="qb")
+        matcher = FakeMatcher([])
+        engine = self._engine(target, src, matcher)
+        engine.run_once()
+        # 4 个种子归并为 2 个发布组 → 只匹配 2 次
+        self.assertEqual(matcher.match_calls, 2)
+
+    def test_group_processed_skip_next_round(self):
+        """发布组已处理(记录含组内任一副本 hash) → 下轮整组跳过。"""
+        h1, h2 = "a" * 40, "b" * 40
+        cand = make_cand(info_hash="d" * 40)
+        src = FakeAdapter(name="tr", torrents=[
+            TorrentInfo(hash=h1, name="Same.Movie", save_path=Path("/data/tv"),
+                        content_path=Path("/data/tv"), size=1000, seeding=True),
+            TorrentInfo(hash=h2, name="Same.Movie", save_path=Path("/data/tv"),
+                        content_path=Path("/data/tv"), size=1000, seeding=True),
+        ])
+        target = FakeAdapter(name="qb")
+        matcher = FakeMatcher([cand])
+        engine = self._engine(target, src, matcher)
+        engine.run_once()   # 第 1 轮: 匹配代表种子 → 注入成功
+        self.assertEqual(matcher.match_calls, 1)
+        self.assertEqual(len(self.store.list(status="success")), 1)
+        engine.run_once()   # 第 2 轮: 组已处理(另一副本为代表) → 整组跳过
+        self.assertEqual(matcher.match_calls, 1)  # 不再匹配
+        self.assertEqual(engine.last_stats["skipped"], 1)
 
 
 if __name__ == "__main__":

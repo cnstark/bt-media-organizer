@@ -66,7 +66,7 @@ class ReseedEngine:
 
     def _match_phase(self, stats: dict) -> None:
         budget = MAX_MATCH_PER_ROUND
-        logger.info(f"[reseed] 匹配阶段开始: 单轮预算 {budget} 个种子")
+        logger.info(f"[reseed] 匹配阶段开始: 单轮预算 {budget} 个发布组")
         for name, adapter in self.adapters.items():
             if budget <= 0:
                 break
@@ -81,28 +81,43 @@ class ReseedEngine:
             logger.info(f"[reseed] [{name}] 做种列表 {n} 个")
             if n == 0:
                 continue
-            # 轮询错峰:每轮从不同起点开始,配合预算覆盖全部种子
-            start = (self._round * 7) % n
-            order = torrents[start:] + torrents[:start]
-            for idx, t in enumerate(order, 1):
+            # 组内去重: 同名同大小 = 同一发布的跨站副本, 整组只匹配一次,
+            # 避免每个副本都重复搜索(TR 内 783 个种子仅 130 个发布组)
+            groups: dict = {}
+            for t in torrents:
+                key = (t.name, t.size)
+                g = groups.setdefault(key, {"rep": t, "hashes": set()})
+                g["hashes"].add(t.hash)
+            group_list = list(groups.values())
+            total = len(group_list)
+            logger.info(f"[reseed] [{name}] 组内去重后 {total} 个发布组")
+            # 轮询错峰:每轮从不同起点开始,配合预算覆盖全部发布组
+            start = (self._round * 7) % total
+            order = group_list[start:] + group_list[:start]
+            for idx, g in enumerate(order, 1):
                 if budget <= 0:
                     break
-                logger.info(f"[reseed] 匹配 [{idx}/{n}] 种子: {t.name[:55]} (源={name}, 预算剩{budget})")
+                t = g["rep"]
+                logger.info(f"[reseed] 匹配 [{idx}/{total}] 发布组: {t.name[:55]} "
+                            f"(跨站副本{len(g['hashes'])}个, 源={name}, 预算剩{budget})")
                 if not match_path(str(t.save_path), self.conf.exclude_paths, []):
                     continue  # 排除目录
-                # 已处理(含失败重试判定)
-                rows = self.store.list_by_source(self.target.name, t.hash)
+                # 组级已处理: 组内任意副本已有记录 → 整组跳过, 不再重复扫描
+                rows = self.store.list_by_sources(self.target.name, list(g["hashes"]))
                 if any(r.status in ("pending", "success", "skipped") for r in rows):
+                    logger.info(f"[reseed] 发布组已处理过, 跳过 (组内副本{len(g['hashes'])}个)")
+                    stats["skipped"] += 1
                     continue
-                # 目标下载器已有同 hash(仅非目标源检查:如 qB 种子已被转移进 TR 则无需再辅;
+                # 目标下载器已有组内副本(仅非目标源检查:如 qB 种子已被转移进 TR 则无需再辅;
                 # 目标自身种子必然在目标中, 跳过此检查直接参与匹配——匹配产出是不同
                 # infohash 的同源种子, 与自身共存做种)
                 if adapter is not self.target:
                     try:
-                        if self.target.has_torrent(t.hash):
-                            self.store.add(client_id=self.target.name, source_hash=t.hash,
-                                           info_hash=t.hash, directory=str(t.save_path),
-                                           status="skipped", message="目标下载器已有同 hash")
+                        if any(self.target.has_torrent(h) for h in g["hashes"]):
+                            for h in g["hashes"]:
+                                self.store.add(client_id=self.target.name, source_hash=h,
+                                               info_hash=h, directory=str(t.save_path),
+                                               status="skipped", message="目标下载器已有同 hash")
                             stats["skipped"] += 1
                             continue
                     except Exception as e:  # noqa: BLE001

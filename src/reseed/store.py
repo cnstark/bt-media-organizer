@@ -131,6 +131,18 @@ class ReseedStore:
             ).fetchall()
         return [self._row_to_record(r) for r in rows]
 
+    def list_by_sources(self, client_id: str, hashes: List[str]) -> List[ReseedRecord]:
+        """按一组来源 hash(同一发布的跨站副本)批量查询记录。"""
+        if not hashes:
+            return []
+        placeholders = ",".join("?" * len(hashes))
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM reseed_records WHERE client_id=? AND source_hash IN ({placeholders})",
+                [client_id] + list(hashes),
+            ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
     def exists_active(self, client_id: str, info_hash: str) -> bool:
         """pending/success/skipped 存在即视为已处理(failed 允许重试)。"""
         with self._lock:
