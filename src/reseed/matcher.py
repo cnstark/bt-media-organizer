@@ -255,11 +255,14 @@ class JackettMatcher(Matcher):
                     if found:
                         break
                     time.sleep(RETRY_SLEEP)
+                logger.info(f"[reseed] [{indexer}] 搜索 '{query}' → {len(found)} 条")
                 for it in found:
                     key = (it.title, it.size)
                     if key not in seen:
                         seen.add(key)
                         items.append(it)
+            logger.info(f"[reseed] [{indexer}] 去重后 {len(items)} 条候选, 大小容差内 "
+                       f"{sum(1 for it in items if self._size_ok(it.size, torrent.size))} 条")
             for item in items:
                 if len(results) >= candidates_limit:
                     break
@@ -287,6 +290,7 @@ class JackettMatcher(Matcher):
                     logger.warning(f"[reseed] 候选种子文件比对失败 {item.download_url}: {e}")
                     continue
                 results.append(item)
+                logger.info(f"[reseed] [{indexer}] 命中同源候选: {item.title[:60]} ({item.size/1e9:.2f}GB)")
         return results
 
     # ---------------- 私有 ----------------

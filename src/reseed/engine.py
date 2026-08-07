@@ -66,6 +66,7 @@ class ReseedEngine:
 
     def _match_phase(self, stats: dict) -> None:
         budget = MAX_MATCH_PER_ROUND
+        logger.info(f"[reseed] 匹配阶段开始: 单轮预算 {budget} 个种子")
         for name, adapter in self.adapters.items():
             if budget <= 0:
                 break
@@ -77,14 +78,16 @@ class ReseedEngine:
                 logger.error(f"[reseed] 获取做种列表失败 [{name}]: {e}")
                 continue
             n = len(torrents)
+            logger.info(f"[reseed] [{name}] 做种列表 {n} 个")
             if n == 0:
                 continue
             # 轮询错峰:每轮从不同起点开始,配合预算覆盖全部种子
             start = (self._round * 7) % n
             order = torrents[start:] + torrents[:start]
-            for t in order:
+            for idx, t in enumerate(order, 1):
                 if budget <= 0:
                     break
+                logger.info(f"[reseed] 匹配 [{idx}/{n}] 种子: {t.name[:55]} (源={name}, 预算剩{budget})")
                 if not match_path(str(t.save_path), self.conf.exclude_paths, []):
                     continue  # 排除目录
                 # 已处理(含失败重试判定)
@@ -157,11 +160,15 @@ class ReseedEngine:
 
     def _execute_phase(self, stats: dict) -> None:
         rows = self.store.list(status="pending", limit=MAX_EXECUTE_PER_ROUND)
+        if rows:
+            logger.info(f"[reseed] 执行阶段: {len(rows)} 个待注入")
         for row in rows:
             ok, msg = self._execute(row)
             self.store.update_status(row.id, "success" if ok else "failed", msg)
             if ok:
                 stats["injected"] += 1
+                title = row.payload_dict().get("title") or row.info_hash
+                logger.info(f"[reseed] 注入成功: [{row.site}] {str(title)[:55]} → {row.directory}")
             else:
                 stats["failed"] += 1
                 logger.warning(f"[reseed] 注入失败 {row.info_hash} [{row.site}]: {msg}")
