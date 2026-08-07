@@ -93,11 +93,12 @@ class TestJackettMatcher(unittest.TestCase):
 
         m = make_matcher(handler)
         t = make_torrent_with_files(LOCAL_FILES, hash_="h1")
-        cands = m.match(t, LOCAL_FILES, 10)
+        with unittest.mock.patch("src.reseed.matcher.time.sleep"):
+            cands = m.match(t, LOCAL_FILES, 10)
         self.assertEqual(len(cands), 1)
         self.assertEqual(cands[0].info_hash, "H1")
-        # 只有两个搜索请求,无下载请求
-        self.assertEqual(len(requested), 2)
+        # siteA 命中 1 次搜索;siteB 空结果 → 重试 1 次,共 2 次;无下载请求
+        self.assertEqual(len(requested), 3)
         self.assertNotIn("/dl/1", requested[0])
 
     def test_diff_infohash_matches_by_files(self):
@@ -146,8 +147,10 @@ class TestJackettMatcher(unittest.TestCase):
 
         m = make_matcher(handler, indexers=["siteB"])
         t = make_torrent_with_files(LOCAL_FILES)
-        m.match(t, LOCAL_FILES, 10)
-        self.assertEqual(paths, ["/api/v2.0/indexers/siteB/results/torznab"])
+        with unittest.mock.patch("src.reseed.matcher.time.sleep"):
+            m.match(t, LOCAL_FILES, 10)
+        # 空结果 → 重试 1 次,共 2 次请求;且只请求白名单站点
+        self.assertEqual(paths, ["/api/v2.0/indexers/siteB/results/torznab"] * 2)
 
     def test_download_appends_apikey_for_jackett_host(self):
         captured = {}
@@ -176,7 +179,7 @@ class TestBuildSearchQueries(unittest.TestCase):
         from src.reseed.matcher import build_search_queries
         q = build_search_queries(
             "长安三万里.Chang.An.2023.60FPS.2160p.WEB-DL.H265.10bit.DDP5.1-OurTV")
-        self.assertEqual(q, ["长安三万里 Chang An 2023"])
+        self.assertEqual(q, ["长安三万里 Chang An 2023", "长安三万里 2023", "Chang An 2023"])
 
     def test_keep_year(self):
         from src.reseed.matcher import build_search_queries
@@ -186,3 +189,8 @@ class TestBuildSearchQueries(unittest.TestCase):
     def test_no_tags(self):
         from src.reseed.matcher import build_search_queries
         self.assertEqual(build_search_queries("Simple.Movie"), ["Simple Movie"])
+
+    def test_pure_cjk(self):
+        from src.reseed.matcher import build_search_queries
+        q = build_search_queries("罚罪.第二季.2025.2160p.WEB-DL-ADWeb")
+        self.assertEqual(q, ["罚罪 第二季 2025"])

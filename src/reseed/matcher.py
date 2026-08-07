@@ -28,6 +28,11 @@ _TORZNAB_NS = "{http://torznab.com/schemas/2015/feed}"
 # 文件级匹配阈值:本地文件命中比例 ≥ 该值视为同源(容忍候选多出 sample/nfo 等)
 MATCH_RATIO_THRESHOLD = 0.9
 
+# 每索引器文件比对下载预算:超过则放弃该索引器(候选下载是主要耗时,实测单站可达数十秒)
+MAX_DOWNLOAD_PER_INDEXER = 3
+# 搜索空结果重试间隔(秒)
+RETRY_SLEEP = 3
+
 # 种子名中的标签 token(搜索词精简时剔除;组名在 '-' 之后一并截掉)
 _TAG_TOKENS = {
     "2160p", "1080p", "720p", "4k", "uhd", "60fps", "120fps", "web", "web-dl",
@@ -39,28 +44,52 @@ _TAG_TOKENS = {
     "cmct", "diy", "dsnp", "nfweb", "fhd", "uhd", "2160", "1080", "sdr",
 }
 _YEAR_RE = re.compile(r"\b(19|20)\d{2}\b")
+_CJK_RE = re.compile(r"[\u4e00-\u9fff]")
+
+
+def _has_cjk(token: str) -> bool:
+    return bool(_CJK_RE.search(token))
 
 
 def build_search_queries(name: str) -> List[str]:
-    """由完整种子名生成搜索词候选(精简标题, 站内搜索对长名支持差)。
+    """由完整种子名生成搜索词候选(精简标题, 多词回退)。
 
     策略: 截掉 '-' 后的组名 → 剔除标签 token → 保留标题 token + 年份。
+    站间搜索能力差异(实证):
+      - btschool 类: 中英混合词可搜('长安三万里 Chang An 2023' → 23 条)
+      - hdarea 类(NexusPHP): 混合词返回 0, 纯中文/纯英文各自可搜
+    因此生成 [混合词, 中文词, 英文词] 依次回退。
     例: '长安三万里.Chang.An.2023.60FPS.2160p.WEB-DL.H265.10bit.DDP5.1-OurTV'
-        → ['长安三万里 Chang An 2023']
+        → ['长安三万里 Chang An 2023', '长安三万里 2023', 'Chang An 2023']
     """
     base = name.split("-")[0] if "-" in name else name
-    keep: List[str] = []
+    tokens: List[str] = []
     for tok in base.replace(".", " ").split():
         if tok.lower().strip() in _TAG_TOKENS:
             continue
-        keep.append(tok)
-    m = _YEAR_RE.search(name)
-    query = " ".join(keep)
-    if not query:
+        tokens.append(tok)
+    if not tokens:
         return [name]
-    if m and m.group(0) not in query:
-        query = f"{query} {m.group(0)}"
-    return [query]
+    m = _YEAR_RE.search(name)
+    year = m.group(0) if m else ""
+    cjk = [t for t in tokens if _has_cjk(t)]
+    # 拉丁 token 排除纯数字(年份已单独处理),避免生成无意义搜索词
+    lat = [t for t in tokens if not _has_cjk(t) and not t.isdigit()]
+    if not cjk or not lat:
+        # 纯中文或纯英文标题:单一搜索词即可
+        query = " ".join(tokens)
+        if year and year not in query:
+            query = f"{query} {year}"
+        return [query]
+    # 中英混合标题:依次回退 混合 → 纯中文 → 纯英文
+    queries: List[str] = []
+    for parts in (cjk + lat, cjk, lat):
+        query = " ".join(parts)
+        if year and year not in query:
+            query = f"{query} {year}"
+        if query not in queries:
+            queries.append(query)
+    return queries
 
 
 @dataclass
@@ -107,6 +136,7 @@ class Matcher(ABC):
 class JackettMatcher(Matcher):
     def __init__(self, conf: JackettConf):
         self.conf = conf
+        # 下载超时:种子经 Jackett 从站点中转下载, 慢站 30s 内可完成(实证 hdarea 17s)
         self._client = httpx.Client(
             base_url=conf.url.rstrip("/"), timeout=30.0, follow_redirects=True
         )
@@ -131,15 +161,27 @@ class JackettMatcher(Matcher):
         for indexer in self.conf.indexers:
             if len(results) >= candidates_limit:
                 break
+            downloads = 0  # 本索引器文件比对下载预算计数(必须每索引器重置)
+            # 合并所有搜索词的结果, 按 (title, size) 去重(download_url 可能因代理参数
+            # 不同而不同, 同一候选会以不同链接重复出现); 空结果重试 1 次容忍站端临时空窗
             items: List[Candidate] = []
+            seen: set = set()
             for query in queries:
-                try:
-                    items = self._search(indexer, query)
-                except Exception as e:  # noqa: BLE001
-                    logger.warning(f"[reseed] 索引器搜索失败 {indexer}: {e}")
-                    items = []
-                if items:
-                    break  # 精简词已命中;完整词仅作回退
+                found: List[Candidate] = []
+                for attempt in range(2):
+                    try:
+                        found = self._search(indexer, query)
+                    except Exception as e:  # noqa: BLE001
+                        logger.warning(f"[reseed] 索引器搜索失败 {indexer}: {e}")
+                        found = []
+                    if found:
+                        break
+                    time.sleep(RETRY_SLEEP)
+                for it in found:
+                    key = (it.title, it.size)
+                    if key not in seen:
+                        seen.add(key)
+                        items.append(it)
             for item in items:
                 if len(results) >= candidates_limit:
                     break
@@ -150,7 +192,10 @@ class JackettMatcher(Matcher):
                 if item.info_hash and item.info_hash.lower() == torrent.hash.lower():
                     results.append(item)
                     continue
-                # 文件级匹配:下载候选种子,解析文件列表与本地比对
+                # 文件级匹配:下载候选种子,解析文件列表与本地比对(受预算限制)
+                if downloads >= MAX_DOWNLOAD_PER_INDEXER:
+                    continue
+                downloads += 1
                 try:
                     data = self._download(item.download_url)
                     if not data:
@@ -218,12 +263,21 @@ class JackettMatcher(Matcher):
         return self.download(url)
 
     def download(self, url: str) -> Optional[bytes]:
-        """下载候选种子字节。链接为 Jackett 代理时补 apikey。"""
+        """下载候选种子字节(失败重试 2 次)。链接为 Jackett 代理时补 apikey。"""
         self._throttle("__download__")
         if urlparse(url).netloc == urlparse(self.conf.url).netloc:
             sep = "&" if "?" in url else "?"
             if "apikey=" not in url:
                 url = f"{url}{sep}{urlencode({'apikey': self.conf.api_key})}"
-        resp = self._client.get(url)
-        resp.raise_for_status()
-        return resp.content
+        last_err: Optional[Exception] = None
+        for attempt in range(2):
+            try:
+                resp = self._client.get(url)
+                resp.raise_for_status()
+                return resp.content
+            except Exception as e:  # noqa: BLE001
+                last_err = e
+                if attempt < 1:
+                    time.sleep(1.0)
+        logger.warning(f"[reseed] 候选种子下载失败(重试2次): {last_err}")
+        return None

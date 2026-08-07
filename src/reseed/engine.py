@@ -17,8 +17,8 @@ logger = logging.getLogger("bt-media-organizer.reseed")
 # 标记规则 → 注入参数(辅种专用标记,便于识别与清理)
 RESEED_MARKER = "辅种"
 
-# 单轮匹配上限(控制搜索成本;配合轮询错峰覆盖全部种子)
-MAX_MATCH_PER_ROUND = 30
+# 单轮匹配上限(控制搜索成本;搜索式辅种每种子需多站多次搜索+候选下载, 单轮预算不宜过大)
+MAX_MATCH_PER_ROUND = 10
 # 单轮执行上限
 MAX_EXECUTE_PER_ROUND = 20
 
