@@ -273,7 +273,8 @@ class TestReseedEngine(unittest.TestCase):
         m = JackettMatcher(JackettConf(url="http://j", api_key="k", indexers=["btschool"]))
         self.assertEqual(m.site_from_tracker("https://pt.btschool.club/announce.php?passkey=x"), "btschool")
         self.assertEqual(m.site_from_tracker("https://tracker.m-team.io/announce"), "mteamtp")
-        self.assertEqual(m.site_from_tracker("https://tracker.carpt.net/announce"), None)  # 非白名单站
+        self.assertEqual(m.site_from_tracker("https://tracker.carpt.net/announce"), "carpt")
+        self.assertEqual(m.site_from_tracker("https://tracker.zhuque.in/announce"), None)  # 非白名单站
         self.assertEqual(m.site_from_tracker(""), None)
 
 
