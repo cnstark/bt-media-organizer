@@ -333,8 +333,14 @@ class JackettMatcher(Matcher):
                         continue
                     cand_files = file_list(data)
                     if not cand_files:
+                        logger.warning(f"[reseed] [{indexer}] 候选种子无文件列表, 跳过: {item.title[:50]}")
                         continue
-                    if match_ratio(local_files, cand_files) < MATCH_RATIO_THRESHOLD:
+                    ratio = match_ratio(local_files, cand_files)
+                    if ratio < MATCH_RATIO_THRESHOLD:
+                        # 同大小但文件不匹配(不同版本/跨站重命名), 诊断日志
+                        logger.info(f"[reseed] [{indexer}] 候选文件不匹配, 跳过: {item.title[:50]} "
+                                    f"(ratio={ratio:.2f} < {MATCH_RATIO_THRESHOLD}, "
+                                    f"本地{len(local_files)}文件/候选{len(cand_files)}文件)")
                         continue
                     # 填充真实 infohash:Torznab 无 infohash 属性时为空串, 若不带真实
                     # hash 入队会导致不同站候选共用 "" 互相覆盖(幂等误判已处理)
