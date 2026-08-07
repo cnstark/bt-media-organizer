@@ -190,6 +190,17 @@ class ReseedEngine:
                     if rid:
                         matched_cnt += 1
                         stats["matched"] += 1
+                        # 立即执行该候选(下载种子→注入目标下载器), 不等整轮匹配完成
+                        row = self.store.get(rid)
+                        ok, msg = self._execute(row)
+                        self.store.update_status(rid, "success" if ok else "failed", msg)
+                        if ok:
+                            stats["injected"] += 1
+                            title = row.payload_dict().get("title") or c.info_hash
+                            logger.info(f"[reseed] 注入成功: [{row.site}] {str(title)[:55]} → {row.directory}")
+                        else:
+                            stats["failed"] += 1
+                            logger.warning(f"[reseed] 注入失败 {c.info_hash} [{row.site}]: {msg}")
                 if matched_cnt:
                     logger.info(f"[reseed] 发布组匹配成功: {t.name[:50]} 入队 {matched_cnt} 个候选")
                 else:
