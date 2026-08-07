@@ -18,7 +18,7 @@ import httpx
 from ..config import DownloaderConf
 from .base import DownloaderAdapter, TorrentInfo
 
-logger = logging.getLogger("bt-media-organizer.transmission")
+logger = logging.getLogger("ptpilot.transmission")
 
 # transmission 状态码 → 文本
 _STATUS_TEXT = {

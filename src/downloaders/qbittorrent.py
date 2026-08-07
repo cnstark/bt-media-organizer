@@ -11,7 +11,7 @@ import httpx
 from ..config import DownloaderConf
 from .base import DownloaderAdapter, TorrentInfo
 
-logger = logging.getLogger("bt-media-organizer.qbittorrent")
+logger = logging.getLogger("ptpilot.qbittorrent")
 
 # 做种状态集(IYUU 语义):正在上传/做种中/做种暂停/排队校验上传/校验中上传/强制上传
 _SEEDING_STATES = {"uploading", "stalledUP", "pausedUP", "queuedUP", "checkingUP", "forcedUP"}

@@ -12,7 +12,7 @@ from ..downloaders.base import DownloaderAdapter, TorrentInfo
 from ..downloaders.bencode import extract_announce, patch_announce
 from .pathrule import convert_path, match_path
 
-logger = logging.getLogger("bt-media-organizer.transfer")
+logger = logging.getLogger("ptpilot.transfer")
 
 # 标记规则 → 注入参数(与 IYUU 命名一致,便于识别)
 MARKER_TAG = "已转移"

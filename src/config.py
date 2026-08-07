@@ -198,7 +198,7 @@ def _load_rename(data: dict) -> RenameConf:
 
 
 def load_config(path: str) -> Config:
-    """加载 YAML 配置;环境变量 BT_MEDIA_TOKEN 可覆盖 server.token。"""
+    """加载 YAML 配置;环境变量 PTPILOT_TOKEN 可覆盖 server.token。"""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(f"配置文件不存在: {path}")
@@ -206,8 +206,8 @@ def load_config(path: str) -> Config:
 
     cfg = Config()
     cfg.server = _from_dict(ServerConf, raw.get("server"))
-    if os.getenv("BT_MEDIA_TOKEN"):
-        cfg.server.token = os.getenv("BT_MEDIA_TOKEN")
+    if os.getenv("PTPILOT_TOKEN"):
+        cfg.server.token = os.getenv("PTPILOT_TOKEN")
 
     engine_raw = raw.get("engine") or {}
     cfg.engine = _from_dict(EngineConf, engine_raw)

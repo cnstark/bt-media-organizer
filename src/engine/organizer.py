@@ -23,7 +23,7 @@ from . import executor
 from .namer import render_path
 from .planner import PlanItem, is_bluray_dir, plan
 
-logger = logging.getLogger("bt-media-organizer.engine")
+logger = logging.getLogger("ptpilot.engine")
 
 
 @dataclass

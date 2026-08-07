@@ -12,7 +12,7 @@ from ..transfer.pathrule import match_path
 from .matcher import Candidate, Matcher
 from .store import ReseedRecord, ReseedStore
 
-logger = logging.getLogger("bt-media-organizer.reseed")
+logger = logging.getLogger("ptpilot.reseed")
 
 # 标记规则 → 注入参数(辅种专用标记,便于识别与清理)
 RESEED_MARKER = "辅种"

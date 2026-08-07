@@ -16,7 +16,7 @@ from ..config import TmdbConf
 from ..history import HistoryStore
 from ..parse.filename import ParsedMeta
 
-logger = logging.getLogger("bt-media-organizer.tmdb")
+logger = logging.getLogger("ptpilot.tmdb")
 
 # 是否包含 CJK 字符(判断标题是否为中文)
 _CJK_RE = re.compile(r"[\u4e00-\u9fff]")

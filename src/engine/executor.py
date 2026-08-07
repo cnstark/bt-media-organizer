@@ -15,7 +15,7 @@ from typing import Optional
 from ..parse.filename import ParsedMeta, parse_filename
 from ..storage import local
 
-logger = logging.getLogger("bt-media-organizer.executor")
+logger = logging.getLogger("ptpilot.executor")
 
 
 @dataclass

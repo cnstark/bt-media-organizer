@@ -1,7 +1,7 @@
-# bt-media-organizer 详细设计文档 v1.1
+# ptpilot 详细设计文档 v1.1
 
-> 对应需求:`bt-media-organizer-requirements.md`(决策已确认)。本文档为接口/数据/流程定稿,实现以此为据。
-> v1.1(2026-08-06):按实现代码(`workspace/bt-media-organizer/`)校验补充——类别自动分类(category_folder/category_rules)、TMDB api_base/proxy、PUID/PGID 降权、模板上下文变量、接口签名与实际实现对齐、测试清单更新。
+> 对应需求:`ptpilot-requirements.md`(决策已确认)。本文档为接口/数据/流程定稿,实现以此为据。
+> v1.1(2026-08-06):按实现代码(`workspace/ptpilot/`)校验补充——类别自动分类(category_folder/category_rules)、TMDB api_base/proxy、PUID/PGID 降权、模板上下文变量、接口签名与实际实现对齐、测试清单更新。
 
 ---
 
@@ -275,7 +275,7 @@ class TransferEngine:
 
 加载配置 → 初始化日志/历史/引擎 → 启动每下载器轮询线程(daemon)→ 启动 HTTP → 信号优雅退出(SIGINT/SIGTERM)。
 
-- 环境变量:`BT_MEDIA_CONFIG`(配置文件路径,默认 `config.yaml`)、`BT_MEDIA_TOKEN`(覆盖 `server.token`)
+- 环境变量:`PTPILOT_CONFIG`(配置文件路径,默认 `config.yaml`)、`PTPILOT_TOKEN`(覆盖 `server.token`)
 - `PUID`/`PGID`(Docker 部署):root 启动时降权运行(参照 MP),值 ≤0 或非 root 启动则保持当前用户;Dockerfile 另预留 `SUPERUSER`(当前仅记录,通知未启用)
 - 启动时执行历史 `purge()`(按 `history.keep_days` 清理过期记录)
 
@@ -291,7 +291,7 @@ qB 完成下载 → 外部程序 scripts/qb-notify.sh "%F" "%I"(sleep 3 等落�
   (不带 hash 时退化为纯路径整理,标签由轮询兜底补打,最长 60s)
 ```
 
-> **路径一致性**:qB 与 bt-media-organizer 容器必须挂载相同路径,contentPath/脚本参数原样透传,不做宿主↔容器映射。`scripts/qb-notify.sh` 的 token 经环境变量 `BT_MEDIA_TOKEN` 或文件 `/config/bt-media-token` 注入,脚本不硬编码 token。
+> **路径一致性**:qB 与 ptpilot 容器必须挂载相同路径,contentPath/脚本参数原样透传,不做宿主↔容器映射。`scripts/qb-notify.sh` 的 token 经环境变量 `PTPILOT_TOKEN` 或文件 `/config/bt-media-token` 注入,脚本不硬编码 token。
 
 ### 5.2 轮询对账
 ```

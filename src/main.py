@@ -1,10 +1,10 @@
-"""bt-media-organizer 入口:加载配置 → 启动轮询线程 + HTTP 服务。
+"""ptpilot 入口:加载配置 → 启动轮询线程 + HTTP 服务。
 
 用法:
     python -m src.main --config /path/to/config.yaml
 环境变量:
-    BT_MEDIA_CONFIG  配置文件路径(默认 ./config.yaml)
-    BT_MEDIA_TOKEN   覆盖 server.token
+    PTPILOT_CONFIG  配置文件路径(默认 ./config.yaml)
+    PTPILOT_TOKEN   覆盖 server.token
 """
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ from .reseed.matcher import JackettMatcher
 from .reseed.store import ReseedStore
 from .transfer.engine import TransferEngine
 
-logger = logging.getLogger("bt-media-organizer")
+logger = logging.getLogger("ptpilot")
 
 
 def _apply_uid_gid() -> None:
@@ -86,9 +86,9 @@ def _run_once_loop(engine, interval: int, stop: threading.Event):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="bt-media-organizer 轻量媒体整理服务")
-    parser.add_argument("--config", default=os.getenv("BT_MEDIA_CONFIG", "config.yaml"),
-                        help="配置文件路径(默认: config.yaml 或 $BT_MEDIA_CONFIG)")
+    parser = argparse.ArgumentParser(description="ptpilot 轻量媒体整理服务")
+    parser.add_argument("--config", default=os.getenv("PTPILOT_CONFIG", "config.yaml"),
+                        help="配置文件路径(默认: config.yaml 或 $PTPILOT_CONFIG)")
     args = parser.parse_args()
 
     # 配置
@@ -99,7 +99,7 @@ def main() -> None:
         raise SystemExit(1)
 
     setup_logger(conf.log)
-    logger.info("bt-media-organizer 启动中 ...")
+    logger.info("ptpilot 启动中 ...")
     _apply_uid_gid()
 
     # 存储 + 引擎
@@ -184,7 +184,7 @@ def main() -> None:
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
 
-    logger.info("bt-media-organizer 启动完成")
+    logger.info("ptpilot 启动完成")
     while not stop_event.is_set():
         time.sleep(1)
 

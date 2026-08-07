@@ -16,7 +16,7 @@ from urllib.parse import parse_qs, urlparse
 from ..config import Config
 from ..engine import TransferEngine
 
-logger = logging.getLogger("bt-media-organizer.api")
+logger = logging.getLogger("ptpilot.api")
 
 _ROUTE_RE = re.compile(r"^/api/v1/history/(\d+)/redo$")
 _HISTORY_DELETE_RE = re.compile(r"^/api/v1/history/(\d+)/delete$")
@@ -32,7 +32,7 @@ def _json(obj) -> bytes:
 class _Handler(BaseHTTPRequestHandler):
     """请求处理器;server 引用挂在类属性上。"""
 
-    server_version = "bt-media-organizer/0.2"
+    server_version = "ptpilot/0.2"
     engine: TransferEngine = None
     transfer_engine = None          # Optional[TransferEngine]
     reseed_engine = None            # Optional[ReseedEngine]

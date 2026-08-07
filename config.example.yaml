@@ -1,4 +1,4 @@
-# bt-media-organizer 配置文件示例
+# ptpilot 配置文件示例
 # 复制为 config.yaml 后按需修改;支持环境变量覆盖(见 README)
 
 server:

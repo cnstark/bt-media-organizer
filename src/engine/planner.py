@@ -15,7 +15,7 @@ from typing import List, Optional, Tuple
 from ..config import EngineConf
 from ..parse.filename import ParsedMeta, normalize_stem, parse_filename, strip_lang_tag
 
-logger = logging.getLogger("bt-media-organizer.planner")
+logger = logging.getLogger("ptpilot.planner")
 
 # 隐藏目录 / 回收站 / 群晖 @eaDir
 _HIDDEN_RE = re.compile(r"(^|/)(\.|@Recycle|#recycle|@eaDir)(/|$)")

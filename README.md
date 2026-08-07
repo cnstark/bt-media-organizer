@@ -1,4 +1,4 @@
-# bt-media-organizer
+# ptpilot
 
 轻量级媒体管理服务，三个独立功能模块（各自独立开关，全部轮询驱动，无 webhook/事件依赖）：
 
@@ -29,7 +29,7 @@
 cp config.example.yaml config.yaml   # 修改配置(详见下文「配置文件详解」)
 pip install -r requirements.txt
 python -m src.main --config config.yaml
-# 环境变量: BT_MEDIA_CONFIG(配置路径) / BT_MEDIA_TOKEN(覆盖 server.token)
+# 环境变量: PTPILOT_CONFIG(配置路径) / PTPILOT_TOKEN(覆盖 server.token)
 ```
 
 或 Docker(参考 docker-compose.example.yml,`./restart.sh` 一键重建):
@@ -217,7 +217,7 @@ log:
 
 ## 运维要点
 
-- **路径一致性**:整理/转移要求 bt-media-organizer 与下载器看到**相同的目录路径**
+- **路径一致性**:整理/转移要求 ptpilot 与下载器看到**相同的目录路径**
   (如宿主 `/vol6/1004/media2` 双方都挂载为 `/media/media2`)。路径不一致 → 整理不匹配、
   转移后目标校验失败。跨路径场景用 `transfer.path` 前缀转换。
 - **数据库持久化**:`history.db` 必须指向挂载卷内绝对路径(见上),否则重建容器丢

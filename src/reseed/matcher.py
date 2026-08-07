@@ -21,7 +21,7 @@ from ..config import JackettConf
 from ..downloaders.base import TorrentInfo
 from ..downloaders.bencode import file_list, info_hash
 
-logger = logging.getLogger("bt-media-organizer.reseed.matcher")
+logger = logging.getLogger("ptpilot.reseed.matcher")
 
 _TORZNAB_NS = "{http://torznab.com/schemas/2015/feed}"
 
