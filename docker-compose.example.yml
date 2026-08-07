@@ -19,7 +19,27 @@ services:
     environment:
       - TZ=Asia/Shanghai
       # 可选:覆盖 config.yaml 里的 server.token
-      # - PTPILOT_TOKEN=your-token
+      # - PTPILOT_TOKEN=***
     # TMDB 域名解析异常时(如 DNS 污染),可用 extra_hosts 固定解析:
     # extra_hosts:
     #   - "api.themoviedb.org:3.170.103.81"
+
+  # Jackett:PT 站索引聚合器,辅种模块(reseed)的搜索后端
+  # 首次部署:mkdir -p jackett/{config,downloads},启动后打开 http://<host>:9117 配置索引器,
+  # 再把 API key 填入 ptpilot 的 config.yaml(jackett.api_key)。
+  jackett:
+    image: linuxserver/jackett:latest
+    container_name: jackett
+    restart: unless-stopped
+    ports:
+      - "9117:9117"                 # WebUI/API
+    volumes:
+      - ./jackett/config:/config    # Jackett 配置(ServerConfig.json / Indexers.json,含索引器凭据)
+      - ./jackett/downloads:/downloads   # 可选:torrent 黑洞下载目录(当前未用)
+    environment:
+      - TZ=Asia/Shanghai
+      # PUID/PGID:容器内进程用户/组 ID,与 ptpilot 保持一致(0=root)或按需调整
+      - PUID=0
+      - PGID=0
+      # 可选:自动更新 Jackett 本体(linuxserver 镜像默认开启,可显式关掉)
+      # - AUTO_UPDATE=false

@@ -8,6 +8,8 @@ venv/
 config.yaml
 data/
 *.log
+# Jackett 配置与数据(含各站索引器凭据/管理密码,不入仓库)
+jackett/
 
 # 系统
 .DS_Store
