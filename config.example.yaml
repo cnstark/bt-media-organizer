@@ -107,7 +107,7 @@ recognize:
     proxy: ""                   # 如 http://192.168.1.1:7890,留空则读系统 HTTPS_PROXY
 
 history:
-  db: "./data/organizer.db"     # SQLite 路径
+  db: "/data/organizer.db"     # SQLite 路径;Docker 部署务必用挂载卷内绝对路径(如 /data/organizer.db),否则重建容器丢历史
   keep_days: 365                # 历史保留天数,0=永久
 
 log:
