@@ -32,11 +32,12 @@ python -m src.main --config config.yaml
 # 环境变量: PTPILOT_CONFIG(配置路径) / PTPILOT_TOKEN(覆盖 server.token)
 ```
 
-或 Docker(部署版,参考 docker-compose.example.yml,`./restart.sh` 一键重启):
+或 Docker(部署版,参考 docker-compose.example.yml):
 - 镜像: `ghcr.io/cnstark/ptpilot:latest`(GitHub Actions 打 tag 自动构建,多架构 amd64/arm64)
 - 挂载 `./config.yaml:/config/config.yaml:ro`、`./data:/data`(数据库/日志持久化)
 - 挂载媒体库目录(与下载器相同路径,见「路径一致性」)
 - `PUID`/`PGID` 环境变量降权(默认 root)
+- 本地开发调试(修改代码后先构建再启动): `./scripts/debug.sh`
 
 ### 镜像发布(GitHub Actions)
 
@@ -49,7 +50,7 @@ git push origin v1.2.3
 
 - 触发条件: 推送 `v*` 标签(如 `v1.2.3`),也可在 Actions 页面手动运行
 - 产物: `ghcr.io/cnstark/ptpilot` 的 `1.2.3` / `1.2` / `latest` 三个标签
-- 部署机升级: `docker compose pull && docker compose up -d`(或 `./restart.sh`)
+- 部署机升级: `docker compose pull && docker compose up -d`;本地调试用 `./scripts/debug.sh`
 - 工作流文件: `.github/workflows/docker-image.yml`
 
 ## 配置文件详解
@@ -237,8 +238,9 @@ log:
   转移后目标校验失败。跨路径场景用 `transfer.path` 前缀转换。
 - **数据库持久化**:`history.db` 必须指向挂载卷内绝对路径(见上),否则重建容器丢
   整理历史与辅种记录。
-- **重建容器**:`./restart.sh`(down→pull→up)拉取最新镜像;config.yaml 为 bind 挂载,
-  配置改动只需重启,代码改动需先打 tag 发布新镜像再 pull。
+- **重建容器**:部署版 `docker compose pull && docker compose up -d` 拉取最新镜像;
+  本地调试 `./scripts/debug.sh`(先 build 再 up)。config.yaml 为 bind 挂载,
+  配置改动只需重启,代码改动需先打 tag 发布新镜像再 pull(或本地 debug.sh)。
 - **日志**:转移/辅种均有完整过程日志(发布组进度、搜索条数、命中/跳过原因、注入结果);
   辅种失败记录可查 `reseed_records`。
 
