@@ -30,8 +30,9 @@ def _json(obj) -> bytes:
 class _Handler(BaseHTTPRequestHandler):
     """请求处理器;server 引用挂在类属性上。"""
 
-    server_version = "bt-media-organizer/0.1"
+    server_version = "bt-media-organizer/0.2"
     engine: TransferEngine = None
+    transfer_engine = None          # Optional[TransferEngine]
     token: str = ""
 
     # ---------------- 基础 ----------------
@@ -81,6 +82,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._history()
         elif path == "/api/v1/queue":
             self._send(200, _json({"code": 0, "data": self.engine.status()}))
+        elif path == "/api/v1/status":
+            self._status()
         else:
             self._send(404, _json({"code": 404, "message": "not found"}))
 
@@ -94,6 +97,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._transfer(body)
         elif path == "/api/v1/poll":
             self._poll(body)
+        elif path == "/api/v1/transfer/run":
+            self._transfer_run()
         elif (m := _HISTORY_FILES_DELETE_RE.match(path)):
             self._files_delete(int(m.group(1)), body)
         elif (m := _HISTORY_DELETE_RE.match(path)):
@@ -132,6 +137,33 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _poll(self, body: dict) -> None:
         data = self.engine.poll_once(downloader=body.get("downloader"))
+        self._send(200, _json({"code": 0, "data": data}))
+
+    def _transfer_run(self) -> None:
+        """手动触发一次转移扫描。"""
+        if not self.transfer_engine:
+            self._send(200, _json({"code": 1, "message": "transfer 模块未启用"}))
+            return
+        try:
+            data = self.transfer_engine.run_once()
+            self._send(200, _json({"code": 0, "data": data}))
+        except Exception as e:  # noqa: BLE001
+            logger.error(f"transfer/run 异常: {e}")
+            self._send(200, _json({"code": 1, "message": str(e)}))
+
+    def _status(self) -> None:
+        """三模块状态。"""
+        data = {"organize": self.engine.status()}
+        if self.transfer_engine:
+            data["transfer"] = {
+                "enabled": True,
+                "from": self.transfer_engine.conf.from_client,
+                "to": self.transfer_engine.conf.to_client,
+                "last_run": self.transfer_engine.last_run,
+                "last_stats": self.transfer_engine.last_stats,
+            }
+        else:
+            data["transfer"] = {"enabled": False}
         self._send(200, _json({"code": 0, "data": data}))
 
     def _redo(self, history_id: int) -> None:
@@ -193,8 +225,9 @@ def _result_dict(result) -> dict:
 class ApiServer:
     """HTTP 服务封装。"""
 
-    def __init__(self, conf: Config, engine: TransferEngine):
+    def __init__(self, conf: Config, engine: TransferEngine, transfer_engine=None):
         _Handler.engine = engine
+        _Handler.transfer_engine = transfer_engine
         _Handler.token = conf.server.token
         self._httpd = ThreadingHTTPServer((conf.server.host, conf.server.port), _Handler)
         logger.info(f"HTTP 服务已启动: http://{conf.server.host}:{conf.server.port}")

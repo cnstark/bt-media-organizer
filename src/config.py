@@ -8,6 +8,8 @@ from typing import List, Optional
 
 import yaml
 
+from .transfer.pathrule import parse_rule_text
+
 
 # ---------------------------------------------------------------- 配置类
 
@@ -227,7 +229,7 @@ def _load_transfer(data: dict) -> TransferConf:
         conf.path = _from_dict(PathRuleConf, path_raw)
         rules = path_raw.get("rules") or []
         if isinstance(rules, str):
-            conf.path.rules = _parse_rule_text(rules)
+            conf.path.rules = parse_rule_text(rules)
         elif isinstance(rules, list):
             conf.path.rules = [(str(r[0]), str(r[1])) for r in rules if isinstance(r, (list, tuple)) and len(r) == 2]
     return conf
@@ -238,22 +240,6 @@ def _load_reseed(data: dict) -> ReseedConf:
     if data:
         conf.jackett = _from_dict(JackettConf, data.get("jackett"))
     return conf
-
-
-def _parse_rule_text(text: str) -> List[tuple]:
-    """多行规则文本 → [(源前缀, 目标前缀)];'#' 注释,空行跳过,分隔符 '{#**#}'。"""
-    rules: List[tuple] = []
-    for line in text.replace("\r\n", "\n").split("\n"):
-        line = line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "{#**#}" in line:
-            parts = [p.strip() for p in line.split("{#**#}")]
-            if len(parts) == 2 and parts[0]:
-                rules.append((parts[0], parts[1]))
-        elif line:
-            rules.append((line, ""))  # 仅源前缀(用于 sub)
-    return rules
 
 
 def _validate(cfg: Config) -> None:
