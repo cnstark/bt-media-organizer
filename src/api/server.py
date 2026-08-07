@@ -19,6 +19,8 @@ from ..engine import TransferEngine
 logger = logging.getLogger("bt-media-organizer.api")
 
 _ROUTE_RE = re.compile(r"^/api/v1/history/(\d+)/redo$")
+_HISTORY_DELETE_RE = re.compile(r"^/api/v1/history/(\d+)/delete$")
+_HISTORY_FILES_DELETE_RE = re.compile(r"^/api/v1/history/(\d+)/files/delete$")
 
 
 def _json(obj) -> bytes:
@@ -92,6 +94,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._transfer(body)
         elif path == "/api/v1/poll":
             self._poll(body)
+        elif (m := _HISTORY_FILES_DELETE_RE.match(path)):
+            self._files_delete(int(m.group(1)), body)
+        elif (m := _HISTORY_DELETE_RE.match(path)):
+            self._history_delete(int(m.group(1)))
         elif (m := _ROUTE_RE.match(path)):
             self._redo(int(m.group(1)))
         else:
@@ -106,10 +112,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif body.get("hash"):
             source = self._resolve_hash(body["hash"], body.get("downloader"))
             if source is None:
-                self._send(404, _json({"code": 404, "message": "下载器任务不存在或内容路径不可用"}, 404)[0])
+                self._send(404, _json({"code": 404, "message": "下载器任务不存在或内容路径不可用"}))
                 return
         else:
-            self._send(400, _json({"code": 400, "message": "缺少 path 或 hash"}, 400)[0])
+            self._send(400, _json({"code": 400, "message": "缺少 path 或 hash"}))
             return
 
         result = self.engine.organize(
@@ -133,6 +139,19 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(200, _json({"code": 0 if ok else 1,
                                "message": message,
                                "data": _result_dict(result) if result else None}))
+
+    def _history_delete(self, history_id: int) -> None:
+        ok, message = self.engine.delete_history(history_id)
+        self._send(200, _json({"code": 0 if ok else 1, "message": message,
+                               "data": {"deleted": ok}}))
+
+    def _files_delete(self, history_id: int, body: dict) -> None:
+        ok, message, data = self.engine.delete_history_files(
+            history_id,
+            delete_source=bool(body.get("delete_source")),
+            delete_history=bool(body.get("delete_history")),
+        )
+        self._send(200, _json({"code": 0 if ok else 1, "message": message, "data": data}))
 
     def _history(self) -> None:
         query = parse_qs(urlparse(self.path).query)

@@ -148,6 +148,127 @@ def test_overwrite_never():
             store.close()
 
 
+def test_delete_history_only_keeps_files():
+    """仅删除历史记录:文件不受影响,幂等失效。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        downloads = tmp / "downloads" / "movies"
+        downloads.mkdir(parents=True)
+        movie = downloads / "Dune.2021.1080p.BluRay.x264-GROUP.mkv"
+        movie.write_bytes(b"x" * 1024)
+
+        conf = load_config(str(_write_config(tmp)))
+        store = HistoryStore(conf.history.db)
+        engine = TransferEngine(conf, store)
+        try:
+            result = engine.organize(movie)
+            assert result.all_success and result.success == 1, result
+            row = store.list(limit=10)[0]
+            target = Path(row.target_path)
+            assert target.exists()
+
+            ok, msg = engine.delete_history(row.id)
+            assert ok, msg
+            assert store.get_by_id(row.id) is None
+            assert target.exists(), "仅删历史不应动文件"
+            assert movie.exists()
+
+            # 幂等失效:不再跳过,但因目标已存在(never 策略)整理失败
+            result2 = engine.organize(movie)
+            assert result2.failed == 1 and "目标已存在" in result2.items[0]["message"], result2
+        finally:
+            engine.close()
+            store.close()
+
+
+def test_delete_history_files():
+    """删除整理产物:目标/源/历史/空目录清理的完整组合。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        downloads = tmp / "downloads" / "movies"
+        downloads.mkdir(parents=True)
+        movie = downloads / "Dune.2021.1080p.BluRay.x264-GROUP.mkv"
+        movie.write_bytes(b"x" * 1024)
+        sub = downloads / "Dune.2021.chs.ass"
+        sub.write_bytes(b"y" * 128)
+
+        conf = load_config(str(_write_config(tmp)))
+        store = HistoryStore(conf.history.db)
+        engine = TransferEngine(conf, store)
+        try:
+            result = engine.organize(movie)
+            assert result.all_success and result.success == 2, result
+            target = Path(result.items[0]["target"])
+            sub_target = Path(result.items[1]["target"])
+            rows = store.list(limit=10)
+            assert len(rows) == 2
+            movie_row = next(r for r in rows if r.target_path == str(target))
+            sub_row = next(r for r in rows if r.target_path == str(sub_target))
+
+            # 1) 删文件(不删历史):目标删除,源保留,历史保留;
+            #    目标目录里还有字幕文件 → 不清理目录
+            ok, msg, data = engine.delete_history_files(movie_row.id)
+            assert ok, msg
+            assert not target.exists()
+            assert movie.exists()
+            assert store.get_by_id(movie_row.id) is not None
+            assert data["deleted_files"] == [str(target)]
+            assert target.parent.exists()
+
+            # 2) 目标已不存在 → 记入 missing,不报错
+            ok, msg, data = engine.delete_history_files(movie_row.id)
+            assert ok, msg
+            assert data["missing"] == [str(target)]
+
+            # 3) 删字幕文件 + 连源文件 + 连历史:目录变空被清理,库根保留
+            ok, msg, data = engine.delete_history_files(
+                sub_row.id, delete_source=True, delete_history=True)
+            assert ok, msg
+            assert not sub_target.exists()
+            assert not sub.exists()
+            assert store.get_by_id(sub_row.id) is None
+            assert data["deleted_source"] == [str(sub)]
+            assert not sub_target.parent.exists(), "空的目标目录应被清理"
+            assert (tmp / "media").exists(), "库根目录应保留"
+
+            # 4) 记录不存在
+            ok, msg, _ = engine.delete_history_files(99999)
+            assert not ok and "不存在" in msg
+        finally:
+            engine.close()
+            store.close()
+
+
+def test_delete_files_grouped_history():
+    """delete_history=True 时,同 hash 的历史记录一并删除。"""
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp = Path(tmp)
+        downloads = tmp / "downloads" / "movies"
+        downloads.mkdir(parents=True)
+        movie = downloads / "Dune.2021.1080p.BluRay.x264-GROUP.mkv"
+        movie.write_bytes(b"x" * 1024)
+        sub = downloads / "Dune.2021.chs.ass"
+        sub.write_bytes(b"y" * 128)
+
+        conf = load_config(str(_write_config(tmp)))
+        store = HistoryStore(conf.history.db)
+        engine = TransferEngine(conf, store)
+        try:
+            result = engine.organize(movie, download_hash="deadbeef")
+            assert result.all_success and result.success == 2, result
+            rows = store.list(limit=10)
+            assert len(rows) == 2 and all(r.download_hash == "deadbeef" for r in rows)
+
+            ok, msg, data = engine.delete_history_files(rows[0].id, delete_history=True)
+            assert ok, msg
+            assert data["deleted_history"] == [rows[0].id, rows[1].id]
+            assert store.get_by_id(rows[0].id) is None
+            assert store.get_by_id(rows[1].id) is None
+        finally:
+            engine.close()
+            store.close()
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_") and callable(v)]
     failed = 0

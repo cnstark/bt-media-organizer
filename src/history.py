@@ -124,6 +124,15 @@ class HistoryStore:
             self._conn.commit()
             return cur.rowcount > 0
 
+    def list_by_hash(self, download_hash: str) -> List[HistoryRecord]:
+        """按下载 hash 列出全部历史记录(用于删除时连带清理同一次下载的记录)。"""
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM transfer_history WHERE download_hash=?",
+                (download_hash,),
+            ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
     def list(self, status: str = None, limit: int = 50, offset: int = 0) -> List[HistoryRecord]:
         sql = "SELECT * FROM transfer_history"
         args: list = []

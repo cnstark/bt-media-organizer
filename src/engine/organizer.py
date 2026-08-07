@@ -400,6 +400,108 @@ class TransferEngine:
         )
         return result.all_success, result.message, result
 
+    # ------------------------------------------------------------ 删除
+
+    def delete_history(self, history_id: int) -> tuple[bool, str]:
+        """仅删除历史记录(不删任何文件)。"""
+        if not self.store.get_by_id(history_id):
+            return False, f"历史记录不存在: {history_id}"
+        self.store.delete(history_id)
+        logger.info(f"已删除历史记录 #{history_id}")
+        return True, "ok"
+
+    def delete_history_files(self, history_id: int, delete_source: bool = False,
+                             delete_history: bool = False) -> tuple[bool, str, Optional[dict]]:
+        """
+        删除某条历史记录整理出的目标文件;可选同时删除源文件与历史记录。
+
+        - delete_source: 同时删除源路径(下载目录里的原始文件/目录)。
+        - delete_history: 删除后一并删除历史记录;该记录有 download_hash 时,
+          连同同 hash 的所有记录一起删(即整次下载的记录)。
+
+        返回 (ok, message, data);data 含 deleted_files / deleted_source / missing /
+        cleaned_dirs / deleted_history。目标或源已不存在时记入 missing,不算失败。
+        """
+        rec = self.store.get_by_id(history_id)
+        if not rec:
+            return False, f"历史记录不存在: {history_id}", None
+        if not rec.target_path:
+            return False, "该记录没有目标路径(未成功整理,无产物可删)", None
+
+        data: dict = {"deleted_files": [], "missing": [], "deleted_source": [],
+                      "cleaned_dirs": [], "deleted_history": []}
+
+        # 1. 删除目标文件/目录(蓝光原盘等目录整体删除)
+        target = Path(rec.target_path)
+        if target.exists() or target.is_symlink():
+            if not local.delete_file(target):
+                return False, f"删除目标失败: {target}", None
+            data["deleted_files"].append(str(target))
+            data["cleaned_dirs"] = self._cleanup_dirs(
+                target.parent, self._match_library_root(target))
+        else:
+            data["missing"].append(str(target))
+
+        # 2. 可选:删除源文件/目录,并清理下载目录空目录
+        if delete_source and rec.source_path:
+            src = Path(rec.source_path)
+            if src.exists() or src.is_symlink():
+                if not local.delete_file(src):
+                    return False, f"删除源文件失败: {src}", None
+                data["deleted_source"].append(str(src))
+                dir_conf = self.match_dir(src)
+                stop_at = Path(dir_conf.download_path) if dir_conf and dir_conf.download_path else None
+                data["cleaned_dirs"] += self._cleanup_dirs(src.parent, stop_at)
+            else:
+                data["missing"].append(str(src))
+
+        # 3. 可选:删除历史记录(同 hash 的记录一并删除)
+        if delete_history:
+            ids = [rec.id]
+            if rec.download_hash:
+                ids += [r.id for r in self.store.list_by_hash(rec.download_hash)
+                        if r.id != rec.id]
+            for rid in ids:
+                self.store.delete(rid)
+            data["deleted_history"] = ids
+            logger.info(f"已删除历史记录: {ids}")
+
+        logger.info(f"已删除整理产物 #{history_id}: {data['deleted_files']}")
+        return True, "ok", data
+
+    def _match_library_root(self, path: Path) -> Optional[Path]:
+        """找 path 所属的库根目录(删除后空目录清理的边界)。"""
+        for d in self.conf.directories:
+            if not d.library_path:
+                continue
+            lp = Path(d.library_path)
+            try:
+                if path.is_relative_to(lp):
+                    return lp
+            except ValueError:
+                continue
+        return None
+
+    def _cleanup_dirs(self, start: Path, stop_at: Optional[Path],
+                      max_depth: int = 6) -> list:
+        """从 start 向上删除空目录,直到 stop_at(不含)或遇到非空目录;最多 max_depth 层。"""
+        cleaned = []
+        current = start
+        for _ in range(max_depth):
+            if stop_at is not None and current == stop_at:
+                break
+            if not current.exists() or current == current.parent:
+                break
+            try:
+                if any(current.iterdir()):
+                    break
+                current.rmdir()
+                cleaned.append(str(current))
+            except OSError:
+                break
+            current = current.parent
+        return cleaned
+
     # ------------------------------------------------------------ 私有
 
     def _resolve_adapter(self, downloader: str = None) -> Optional[DownloaderAdapter]:

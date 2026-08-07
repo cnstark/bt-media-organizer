@@ -58,6 +58,8 @@ qB「下载完成后运行外部程序」调用 `scripts/qb-notify.sh "%F"`:
 | POST | `/api/v1/transfer` | 手动整理,body:`{path 或 hash, downloader?, preview, force, transfer_type, target_path}` |
 | GET | `/api/v1/history?status=&limit=&offset=` | 历史查询 |
 | POST | `/api/v1/history/{id}/redo` | 按历史重新整理 |
+| POST | `/api/v1/history/{id}/delete` | 删除历史记录(不删文件) |
+| POST | `/api/v1/history/{id}/files/delete` | 删除该记录整理出的文件,body `{delete_source?, delete_history?}` |
 | GET | `/api/v1/queue` | 运行状态 |
 | POST | `/api/v1/poll` | 立即触发轮询 |
 
@@ -78,7 +80,19 @@ curl -X POST "http://127.0.0.1:8900/api/v1/transfer?token=xxx" \
 
 # 历史
 curl "http://127.0.0.1:8900/api/v1/history?status=failed&token=xxx"
+
+# 删除历史记录(不删文件)
+curl -X POST "http://127.0.0.1:8900/api/v1/history/12/delete?token=xxx"
+
+# 删除整理后的文件(可选 delete_source 连源文件一起删、delete_history 连历史一起删)
+curl -X POST "http://127.0.0.1:8900/api/v1/history/12/files/delete?token=xxx" \
+  -H "Content-Type: application/json" \
+  -d '{"delete_source": false, "delete_history": true}'
 ```
+
+> 删除说明:`files/delete` 只删除该记录对应的目标文件/目录,删除后自动向上清理空目录(到库根目录为止);
+> `delete_history: true` 时,该记录有 download_hash 的话会连同同一次下载的所有记录一起删除。
+> 目标/源已不存在时记入 `missing`,不视为错误。
 
 ## 目录结构
 

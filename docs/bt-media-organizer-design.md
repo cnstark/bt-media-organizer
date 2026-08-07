@@ -264,6 +264,8 @@ class TransferEngine:
 | POST | `/api/v1/transfer` | body `{path 或 hash, downloader?, preview?, force?, transfer_type?, target_path?}`;hash 经下载器解析为 content_path |
 | GET | `/api/v1/history?status=&limit=&offset=` | 历史查询(limit 默认 50,上限 500) |
 | POST | `/api/v1/history/{id}/redo` | 重整理(校验源仍存在,删旧记录后 force 重做) |
+| POST | `/api/v1/history/{id}/delete` | 删除历史记录(仅记录,不删文件);记录不存在时 code=1 |
+| POST | `/api/v1/history/{id}/files/delete` | 删除该记录整理出的目标文件/目录,body `{delete_source?, delete_history?}`;删除后向上清理空目录(到库根);`delete_history` 时同 hash 记录一并删除;已不存在的目标/源记入 `missing` 不报错;响应 data 含 `deleted_files/deleted_source/missing/cleaned_dirs/deleted_history` |
 | GET | `/api/v1/queue` | 运行状态:`{processing, recent(最近20条), downloaders}` |
 | POST | `/api/v1/poll` | 立即触发对账,body `{downloader?}`(缺省用第一个下载器) |
 
