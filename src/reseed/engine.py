@@ -101,6 +101,7 @@ class ReseedEngine:
                 logger.info(f"[reseed] 匹配 [{idx}/{total}] 发布组: {t.name[:55]} "
                             f"(跨站副本{len(g['hashes'])}个, 源={name}, 预算剩{budget})")
                 if not match_path(str(t.save_path), self.conf.exclude_paths, []):
+                    logger.info(f"[reseed] 发布组被排除目录过滤: {t.name[:50]}")
                     continue  # 排除目录
                 # 组级已处理: 组内任意副本已有记录 → 整组跳过, 不再重复扫描
                 rows = self.store.list_by_sources(self.target.name, list(g["hashes"]))
@@ -118,6 +119,7 @@ class ReseedEngine:
                                 self.store.add(client_id=self.target.name, source_hash=h,
                                                info_hash=h, directory=str(t.save_path),
                                                status="skipped", message="目标下载器已有同 hash")
+                            logger.info(f"[reseed] 发布组在目标下载器已有副本, 跳过: {t.name[:50]}")
                             stats["skipped"] += 1
                             continue
                     except Exception as e:  # noqa: BLE001
@@ -130,16 +132,18 @@ class ReseedEngine:
                     logger.error(f"[reseed] 获取本地文件列表失败 {t.hash}: {e}")
                     continue
                 if not local_files:
-                    logger.warning(f"[reseed] 本地文件列表为空,跳过匹配 {t.hash}")
+                    logger.warning(f"[reseed] 发布组本地文件列表为空, 无法匹配: {t.name[:50]} (hash={t.hash[:12]})")
                     continue
                 try:
                     cands = self.matcher.match(t, local_files, self.conf.jackett.max_candidates)
                 except Exception as e:  # noqa: BLE001
-                    logger.error(f"[reseed] 匹配失败 {t.hash} {t.name}: {e}")
+                    logger.error(f"[reseed] 发布组匹配异常: {t.name[:50]} 原因: {e}")
                     continue
                 if not cands:
                     stats["no_match"] += 1
+                    logger.info(f"[reseed] 发布组无匹配候选: {t.name[:50]} (各站搜索后无同源, 可能仅本站独有)")
                     continue  # 不落库,下轮错峰重试
+                matched_cnt = 0
                 for c in cands:
                     # 已处理(含失败重试:failed 重置为 pending)
                     existing = self.store.get_by_hash(self.target.name, c.info_hash)
@@ -168,7 +172,13 @@ class ReseedEngine:
                         payload={"download_url": c.download_url, "title": c.title},
                     )
                     if rid:
+                        matched_cnt += 1
                         stats["matched"] += 1
+                if matched_cnt:
+                    logger.info(f"[reseed] 发布组匹配成功: {t.name[:50]} 入队 {matched_cnt} 个候选")
+                else:
+                    logger.info(f"[reseed] 发布组候选全部已存在/已处理: {t.name[:50]} "
+                                f"(搜索到 {len(cands)} 候选但均无需注入)")
                 budget -= 1
 
     # ---------------- 执行阶段 ----------------
