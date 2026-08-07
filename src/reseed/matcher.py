@@ -33,6 +33,16 @@ MAX_DOWNLOAD_PER_INDEXER = 3
 # 搜索空结果重试间隔(秒)
 RETRY_SLEEP = 3
 
+# tracker 域名关键词 → Jackett 索引器 id(辅种跳过已覆盖站点用; 可用配置覆盖)
+DEFAULT_TRACKER_MAP = {
+    "btschool": "btschool",
+    "hddolby": "hddolby",
+    "hdarea": "hdarea",
+    "hdfans": "hdfans",
+    "m-team": "mteamtp",
+    "mteamtp": "mteamtp",
+}
+
 # 种子名中的标签 token(搜索词精简时剔除;组名在 '-' 之后一并截掉)
 _TAG_TOKENS = {
     "2160p", "1080p", "720p", "4k", "uhd", "60fps", "120fps", "web", "web-dl",
@@ -192,6 +202,16 @@ class Matcher(ABC):
     def download(self, url: str) -> Optional[bytes]:
         """下载候选种子字节(执行阶段用)。"""
 
+    def site_from_tracker(self, tracker_url: str) -> Optional[str]:
+        """由 tracker 地址识别站点(Jackett 索引器 id); 识别不到返回 None。"""
+        if not tracker_url:
+            return None
+        domain = urlparse(tracker_url).netloc.lower()
+        for keyword, indexer in DEFAULT_TRACKER_MAP.items():
+            if keyword.lower() in domain:
+                return indexer
+        return None
+
 
 class JackettMatcher(Matcher):
     def __init__(self, conf: JackettConf):
@@ -207,6 +227,19 @@ class JackettMatcher(Matcher):
             global_interval=conf.global_interval,
             cooldown_seconds=conf.cooldown_seconds,
         )
+        # tracker 域名 → 索引器 id 映射(内置默认 + 配置覆盖)
+        self._tracker_map = dict(DEFAULT_TRACKER_MAP)
+        self._tracker_map.update(conf.tracker_map or {})
+
+    def site_from_tracker(self, tracker_url: str) -> Optional[str]:
+        """由 tracker 地址识别站点(内置默认 + 配置覆盖)。"""
+        if not tracker_url:
+            return None
+        domain = urlparse(tracker_url).netloc.lower()
+        for keyword, indexer in self._tracker_map.items():
+            if keyword.lower() in domain:
+                return indexer
+        return None
 
     # ---------------- 流控 ----------------
 
@@ -231,10 +264,20 @@ class JackettMatcher(Matcher):
     # ---------------- 匹配 ----------------
 
     def match(self, torrent: TorrentInfo, local_files: List[Tuple[str, int]],
-              candidates_limit: int) -> List[Candidate]:
+              candidates_limit: int, skip_indexers: Optional[set] = None) -> List[Candidate]:
+        """按标题+大小+文件列表找同源候选。
+
+        skip_indexers: 已覆盖站点(组内副本 tracker 识别), 跳过其搜索。
+        """
         results: List[Candidate] = []
         queries = build_search_queries(torrent.name)
+        skip_indexers = skip_indexers or set()
         for indexer in self.conf.indexers:
+            if len(results) >= candidates_limit:
+                break
+            if indexer in skip_indexers:
+                logger.info(f"[reseed] [{indexer}] 已覆盖(组内存在该站副本), 跳过搜索")
+                continue
             if len(results) >= candidates_limit:
                 break
             if not self._acquire("search", indexer):

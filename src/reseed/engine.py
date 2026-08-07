@@ -64,6 +64,16 @@ class ReseedEngine:
 
     # ---------------- 匹配阶段 ----------------
 
+    def _covered_indexers(self, g: dict) -> set:
+        """组内副本 tracker 识别出的已覆盖站点(仅白名单内)。"""
+        covered = set()
+        for tracker in g.get("trackers", set()):
+            indexer = self.matcher.site_from_tracker(tracker)
+            if indexer:
+                covered.add(indexer)
+        whitelist = set(self.conf.jackett.indexers)
+        return covered & whitelist
+
     def _match_phase(self, stats: dict) -> None:
         budget = MAX_MATCH_PER_ROUND
         logger.info(f"[reseed] 匹配阶段开始: 单轮预算 {budget} 个发布组")
@@ -86,8 +96,10 @@ class ReseedEngine:
             groups: dict = {}
             for t in torrents:
                 key = (t.name, t.size)
-                g = groups.setdefault(key, {"rep": t, "hashes": set()})
+                g = groups.setdefault(key, {"rep": t, "hashes": set(), "trackers": set()})
                 g["hashes"].add(t.hash)
+                if t.tracker:
+                    g["trackers"].add(t.tracker)
             group_list = list(groups.values())
             total = len(group_list)
             logger.info(f"[reseed] [{name}] 组内去重后 {total} 个发布组")
@@ -98,8 +110,11 @@ class ReseedEngine:
                 if budget <= 0:
                     break
                 t = g["rep"]
+                covered = self._covered_indexers(g)
                 logger.info(f"[reseed] 匹配 [{idx}/{total}] 发布组: {t.name[:55]} "
                             f"(跨站副本{len(g['hashes'])}个, 源={name}, 预算剩{budget})")
+                if covered:
+                    logger.info(f"[reseed] 发布组已覆盖站点(跳过搜索): {sorted(covered)}")
                 if not match_path(str(t.save_path), self.conf.exclude_paths, []):
                     logger.info(f"[reseed] 发布组被排除目录过滤: {t.name[:50]}")
                     continue  # 排除目录
@@ -135,7 +150,8 @@ class ReseedEngine:
                     logger.warning(f"[reseed] 发布组本地文件列表为空, 无法匹配: {t.name[:50]} (hash={t.hash[:12]})")
                     continue
                 try:
-                    cands = self.matcher.match(t, local_files, self.conf.jackett.max_candidates)
+                    cands = self.matcher.match(t, local_files, self.conf.jackett.max_candidates,
+                                               skip_indexers=self._covered_indexers(g))
                 except Exception as e:  # noqa: BLE001
                     logger.error(f"[reseed] 发布组匹配异常: {t.name[:50]} 原因: {e}")
                     continue

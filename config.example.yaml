@@ -97,7 +97,9 @@ reseed:
     per_indexer_delay: 3.0      # 同站请求最小间隔(秒),防管控
     per_minute: 8                # 同站每分钟请求上限,防管控
     global_interval: 1.0       # 全局(所有站合计)最小间隔(秒)
-    cooldown_seconds: 120.0    # 站点失败(429/超时)后冷却(秒),防限速
+    cooldown_seconds: 120.0    # 站点失败(429/超时)后冷却(秒)
+    # tracker_map: {}          # 可选: tracker域名关键词→索引器id,覆盖内置默认
+                              # 内置: btschool/hddolby/hdarea/hdfans/m-team→mteamtp,防限速
   exclude_paths: []             # 这些目录内的做种不参与辅种(前缀匹配)
 
 recognize:

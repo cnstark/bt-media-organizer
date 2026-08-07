@@ -62,9 +62,11 @@ class FakeMatcher(Matcher):
         self.candidates = candidates or []
         self.fail_download = fail_download
         self.match_calls = 0
+        self.last_skip: set = set()
 
-    def match(self, torrent, local_files, candidates_limit):
+    def match(self, torrent, local_files, candidates_limit, skip_indexers=None):
         self.match_calls += 1
+        self.last_skip = set(skip_indexers or set())
         return list(self.candidates)[:candidates_limit]
 
     def download(self, url):
@@ -239,6 +241,40 @@ class TestReseedEngine(unittest.TestCase):
         engine.run_once()   # 第 2 轮: 组已处理(另一副本为代表) → 整组跳过
         self.assertEqual(matcher.match_calls, 1)  # 不再匹配
         self.assertEqual(engine.last_stats["skipped"], 1)
+
+    def test_covered_sites_skipped_in_search(self):
+        """组内副本 tracker 识别已覆盖站点 → 搜索时跳过这些站。"""
+        cand = make_cand(info_hash="d" * 40)
+        src = FakeAdapter(name="tr", torrents=[
+            # 同组 3 个副本, tracker 覆盖 btschool + hdarea
+            TorrentInfo(hash="a" * 40, name="Same.Movie", save_path=Path("/data/tv"),
+                        content_path=Path("/data/tv"), size=1000, seeding=True,
+                        tracker="https://pt.btschool.club/announce.php?passkey=x"),
+            TorrentInfo(hash="b" * 40, name="Same.Movie", save_path=Path("/data/tv"),
+                        content_path=Path("/data/tv"), size=1000, seeding=True,
+                        tracker="https://tracker.hdarea.club/announce"),
+            TorrentInfo(hash="c" * 40, name="Same.Movie", save_path=Path("/data/tv"),
+                        content_path=Path("/data/tv"), size=1000, seeding=True,
+                        tracker="https://hdfans.org/announce.php"),
+        ])
+        target = FakeAdapter(name="qb")
+        matcher = FakeMatcher([cand])
+        conf = make_conf()
+        conf.jackett.indexers = ["btschool", "hdarea", "hdfans", "mteamtp"]
+        engine = ReseedEngine(conf, {"qb": target, "tr": src}, self.store, matcher)
+        engine.run_once()
+        # 组内已覆盖 btschool/hdarea/hdfans(白名单内) → 搜索时跳过这 3 站, 只搜 mteamtp
+        self.assertEqual(matcher.last_skip, {"btschool", "hdarea", "hdfans"})
+
+    def test_tracker_map_site_from_tracker(self):
+        """tracker 域名 → 索引器 id 映射(内置默认)。"""
+        from src.reseed.matcher import JackettMatcher
+        from src.config import JackettConf
+        m = JackettMatcher(JackettConf(url="http://j", api_key="k", indexers=["btschool"]))
+        self.assertEqual(m.site_from_tracker("https://pt.btschool.club/announce.php?passkey=x"), "btschool")
+        self.assertEqual(m.site_from_tracker("https://tracker.m-team.io/announce"), "mteamtp")
+        self.assertEqual(m.site_from_tracker("https://tracker.carpt.net/announce"), None)  # 非白名单站
+        self.assertEqual(m.site_from_tracker(""), None)
 
 
 if __name__ == "__main__":

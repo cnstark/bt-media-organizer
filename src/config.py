@@ -150,6 +150,7 @@ class JackettConf:
     per_minute: int = 8                # 同站每分钟请求上限(防管控)
     global_interval: float = 1.0       # 全局(所有站合计)最小间隔(秒)
     cooldown_seconds: float = 120.0    # 站点失败(429/超时)后冷却(秒)
+    tracker_map: dict = field(default_factory=dict)  # tracker域名关键词→索引器id,覆盖内置默认
 
 
 @dataclass
