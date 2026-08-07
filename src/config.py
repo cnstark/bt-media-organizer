@@ -209,16 +209,20 @@ def load_config(path: str) -> Config:
     if os.getenv("PTPILOT_TOKEN"):
         cfg.server.token = os.getenv("PTPILOT_TOKEN")
 
-    engine_raw = raw.get("engine") or {}
+    # 整理(organize)模块配置:统一从顶层 organize 层级读取
+    org_raw = raw.get("organize")
+    if org_raw is None:
+        raise ValueError("配置缺少 organize 层级:整理配置(engine/directories/recognize)需放在 organize 下")
+    engine_raw = org_raw.get("engine") or {}
     cfg.engine = _from_dict(EngineConf, engine_raw)
     cfg.engine.rename = _load_rename(engine_raw.get("rename"))
 
-    cfg.directories = [_from_dict(TransferDirConf, d) for d in raw.get("directories") or []]
+    cfg.directories = [_from_dict(TransferDirConf, d) for d in org_raw.get("directories") or []]
     cfg.downloaders = [_from_dict(DownloaderConf, d) for d in raw.get("downloaders") or []]
     cfg.transfer = _load_transfer(raw.get("transfer"))
     cfg.reseed = _load_reseed(raw.get("reseed"))
-    cfg.recognize = _from_dict(RecognizeConf, raw.get("recognize"))
-    cfg.recognize.tmdb = _from_dict(TmdbConf, (raw.get("recognize") or {}).get("tmdb"))
+    cfg.recognize = _from_dict(RecognizeConf, org_raw.get("recognize"))
+    cfg.recognize.tmdb = _from_dict(TmdbConf, (org_raw.get("recognize") or {}).get("tmdb"))
     cfg.history = _from_dict(HistoryConf, raw.get("history"))
     cfg.log = _from_dict(LogConf, raw.get("log"))
 

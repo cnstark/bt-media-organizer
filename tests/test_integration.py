@@ -21,18 +21,19 @@ server:
   host: "127.0.0.1"
   port: 18900
   token: "test-token"
-engine:
-  threads: 2
-  rename:
-    movie: "{{{{title}}}}{{% if year %}} ({{{{year}}}}){{% endif %}}/{{{{title}}}}{{% if year %}} ({{{{year}}}}){{% endif %}}{{% if quality %}} - {{{{quality}}}}{{% endif %}}{{{{ext}}}}"
-    tv: "{{{{title}}}}{{% if year %}} ({{{{year}}}}){{% endif %}}/{{{{season_dir}}}}/{{{{title}}}} - {{{{season_episode}}}}{{{{ext}}}}"
-  default_overwrite: never
-directories:
-  - name: "movies"
-    download_path: "{tmp / 'downloads' / 'movies'}"
-    library_path: "{tmp / 'media'}"
-    transfer_type: {transfer_type}
-    media_type: movie
+organize:
+  engine:
+    threads: 2
+    rename:
+      movie: "{{{{title}}}}{{% if year %}} ({{{{year}}}}){{% endif %}}/{{{{title}}}}{{% if year %}} ({{{{year}}}}){{% endif %}}{{% if quality %}} - {{{{quality}}}}{{% endif %}}{{{{ext}}}}"
+      tv: "{{{{title}}}}{{% if year %}} ({{{{year}}}}){{% endif %}}/{{{{season_dir}}}}/{{{{title}}}} - {{{{season_episode}}}}{{{{ext}}}}"
+    default_overwrite: never
+  directories:
+    - name: "movies"
+      download_path: "{tmp / 'downloads' / 'movies'}"
+      library_path: "{tmp / 'media'}"
+      transfer_type: {transfer_type}
+      media_type: movie
 downloaders: []
 history:
   db: "{tmp / 'data' / 'organizer.db'}"

@@ -18,16 +18,17 @@ server:
   host: "127.0.0.1"
   port: 18900
   token: "t"
-engine:
-  threads: 1
-directories:
-  - name: "tv"
-    download_path: "{tmp / 'dl'}"
-    library_path: "{tmp / 'lib'}"
-    transfer_type: copy
-    media_type: tv
-    category_folder: true
-{extra}
+organize:
+  engine:
+    threads: 1
+  directories:
+    - name: "tv"
+      download_path: "{tmp / 'dl'}"
+      library_path: "{tmp / 'lib'}"
+      transfer_type: copy
+      media_type: tv
+      category_folder: true
+  {extra}
 downloaders: []
 history:
   db: "{tmp / 'data.db'}"
@@ -66,8 +67,8 @@ def test_custom_rules_dict():
     """用户配置 category_rules(dict) → 解析生效。"""
     with tempfile.TemporaryDirectory() as tmp:
         engine = _make_engine(Path(tmp), extra="""    category_rules:
-      纪录片: { genre_ids: "99" }
-      其他: {}""")
+        纪录片: { genre_ids: "99" }
+        其他: {}""")
         try:
             media = MediaInfo(media_type="tv", genre_ids=[99], origin_country=["CN"])
             root = engine._category_root(Path("/lib"), engine.conf.directories[0], media)

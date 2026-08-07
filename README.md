@@ -66,34 +66,47 @@ server:
   token: "change-me"      # API 鉴权 token,必填且务必修改(所有接口除 /health 外均需)
 ```
 
-### engine + directories(整理模块)
+### organize(整理模块)
+
+> 整理相关配置(引擎/目录映射/识别)统一放在 `organize` 层级下,
+> 这是唯一写法(旧版平铺在顶层的布局不再支持)。
 
 ```yaml
-engine:
-  threads: 2                        # 单次整理内文件并发数
-  rename:                           # 命名模板(Jinja2)
-    movie: "{{title}} ({{year}})/{{title}} ({{year}}){{ext}}"
-    tv: "{{title}} ({{year}})/{{season_dir}}/{{title}} - {{season_episode}}{{ext}}"
-    s0_alias: ["Specials", "SPs"]   # 第 0 季目录别名
-    subtitle_lang_tag: true         # 字幕文件追加语言标记(.zh-cn)
-  default_overwrite: never          # never / always / size / latest
-  min_filesize: 0                   # MB,0=不限制
-  exclude_words: []                 # 全局整理屏蔽词(路径命中即跳过)
-  media_exts / subtitle_exts / audio_exts / tmp_exts:  # 文件类型表
-  delete_empty_source_dirs: true    # move 模式整理完清理源空目录
+organize:
+  engine:
+    threads: 2                        # 单次整理内文件并发数
+    rename:                           # 命名模板(Jinja2)
+      movie: "{{title}} ({{year}})/{{title}} ({{year}}){{ext}}"
+      tv: "{{title}} ({{year}})/{{season_dir}}/{{title}} - {{season_episode}}{{ext}}"
+      s0_alias: ["Specials", "SPs"]   # 第 0 季目录别名
+      subtitle_lang_tag: true         # 字幕文件追加语言标记(.zh-cn)
+    default_overwrite: never          # never / always / size / latest
+    min_filesize: 0                   # MB,0=不限制
+    exclude_words: []                 # 全局整理屏蔽词(路径命中即跳过)
+    media_exts / subtitle_exts / audio_exts / tmp_exts:  # 文件类型表
+    delete_empty_source_dirs: true    # move 模式整理完清理源空目录
 
-directories:                        # 下载目录→媒体库映射,按顺序匹配,命中即止
-  - name: "电视剧"
-    download_path: "/data/downloads/tv"   # 下载器保存路径(必须与下载器看到的路径一致)
-    library_path: "/data/media"           # 媒体库目标路径
-    transfer_type: hardlink               # move / copy / hardlink / softlink
-    media_type: tv                        # movie / tv / all
-    category: ~                           # 固定类别子目录(如 "华语");留空不建
-    category_folder: true                 # 按识别类别自动建子目录(未识别归"未分类")
-    category_rules: {}                    # 可选,MP 格式(如 {纪录片: {genre_ids: "99"}})
-    renaming: true                        # false = 保持原文件名直接转移
-    monitor: true                         # 参与轮询匹配
-    overwrite_mode: ~ / min_filesize: ~ / exclude_words: []   # 目录级覆盖,留空继承全局
+  directories:                        # 下载目录→媒体库映射,按顺序匹配,命中即止
+    - name: "电视剧"
+      download_path: "/data/downloads/tv"   # 下载器保存路径(必须与下载器看到的路径一致)
+      library_path: "/data/media"           # 媒体库目标路径
+      transfer_type: hardlink               # move / copy / hardlink / softlink
+      media_type: tv                        # movie / tv / all
+      category: ~                           # 固定类别子目录(如 "华语");留空不建
+      category_folder: true                 # 按识别类别自动建子目录(未识别归"未分类")
+      category_rules: {}                    # 可选,MP 格式(如 {纪录片: {genre_ids: "99"}})
+      renaming: true                        # false = 保持原文件名直接转移
+      monitor: true                         # 参与轮询匹配
+      overwrite_mode: ~ / min_filesize: ~ / exclude_words: []   # 目录级覆盖,留空继承全局
+
+  recognize:
+    tmdb:
+      enabled: false            # 需 TMDB API key
+      api_key: ""
+      language: "zh-CN"
+      timeout: 10
+      api_base: "https://api.themoviedb.org/3"   # 可换镜像/自建反代
+      proxy: ""                 # 如 http://127.0.0.1:7890;留空读系统 HTTPS_PROXY
 ```
 
 ### downloaders(下载器)
@@ -190,18 +203,9 @@ TR 校验共存做种(不同 infohash 的同源种子可共存,即 IYUU 式辅�
 > 性能提示:搜索式辅种较慢(单发布组约 1-3 分钟),单轮预算 10 组、轮询错峰覆盖;
 > 已被 IYUU 辅全的发布组(白名单站全覆盖)零搜索直接跳过。
 
-### recognize + history + log
+### history + log
 
 ```yaml
-recognize:
-  tmdb:
-    enabled: false            # 需 TMDB API key
-    api_key: ""
-    language: "zh-CN"
-    timeout: 10
-    api_base: "https://api.themoviedb.org/3"   # 可换镜像/自建反代
-    proxy: ""                 # 如 http://127.0.0.1:7890;留空读系统 HTTPS_PROXY
-
 history:
   db: "/data/organizer.db"    # SQLite 路径;Docker 务必用挂载卷内绝对路径(/data/...),否则重建容器丢历史
   keep_days: 365              # 历史保留天数,0=永久
@@ -218,6 +222,7 @@ log:
 | 方法 | 路径 | 说明 |
 |---|---|---|
 | GET | `/health` | 健康检查(免鉴权) |
+| POST | `/api/v1/download` | 添加下载任务(统一注入入口),body:`{downloader?, save_path?, url 或 torrent, category?, tags?, paused?, skip_checking?}`;`url` 为 magnet/http(s) 种子链接,`torrent` 为 .torrent 字节的 base64,二选一;下载器配置只此一份,找片侧无需持有下载器凭据 |
 | POST | `/api/v1/transfer` | 手动整理,body:`{path 或 hash, downloader?, preview, force, transfer_type, target_path}` |
 | GET | `/api/v1/history?status=&limit=&offset=` | 整理历史查询 |
 | POST | `/api/v1/history/{id}/redo` | 按历史重新整理 |

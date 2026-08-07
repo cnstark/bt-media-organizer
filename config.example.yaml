@@ -6,44 +6,56 @@ server:
   port: 8900
   token: "change-me"            # API 鉴权,请务必修改
 
-engine:
-  threads: 2                    # 单次整理内文件并发数
-  rename:
-    movie: "{{title}}{% if year %} ({{year}}){% endif %}/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if quality %} - {{quality}}{% endif %}{{ext}}"
-    tv: "{{title}}{% if year %} ({{year}}){% endif %}/{{season_dir}}/{{title}} - {{season_episode}}{% if part %}-{{part}}{% endif %}{{ext}}"
-    s0_alias: ["Specials", "SPs"]   # 第 0 季目录名(取第一个)
-    subtitle_lang_tag: true     # 字幕文件追加语言标记
-  default_overwrite: never      # never / always / size / latest
-  min_filesize: 0               # MB,0=不限制
-  exclude_words: []             # 全局整理屏蔽词(路径命中即跳过)
-  media_exts: [".mkv", ".mp4", ".ts", ".iso", ".avi", ".wmv", ".rmvb", ".mov", ".m2ts"]
-  subtitle_exts: [".srt", ".ass", ".ssa", ".sub", ".idx"]
-  audio_exts: [".mka", ".flac", ".aac", ".dts", ".ac3", ".wav", ".eac3"]
-  tmp_exts: [".part", ".download", ".!qb", ".torrent"]   # 下载中/临时后缀
-  delete_empty_source_dirs: true  # move 模式下整理完清理源空目录
+# ---------- 功能 1:整理(organize) ----------
+# 整理相关配置(引擎/目录映射/识别)统一放在本层级
+organize:
+  engine:
+    threads: 2                    # 单次整理内文件并发数
+    rename:
+      movie: "{{title}}{% if year %} ({{year}}){% endif %}/{{title}}{% if year %} ({{year}}){% endif %}{% if part %}-{{part}}{% endif %}{% if quality %} - {{quality}}{% endif %}{{ext}}"
+      tv: "{{title}}{% if year %} ({{year}}){% endif %}/{{season_dir}}/{{title}} - {{season_episode}}{% if part %}-{{part}}{% endif %}{{ext}}"
+      s0_alias: ["Specials", "SPs"]   # 第 0 季目录名(取第一个)
+      subtitle_lang_tag: true     # 字幕文件追加语言标记
+    default_overwrite: never      # never / always / size / latest
+    min_filesize: 0               # MB,0=不限制
+    exclude_words: []             # 全局整理屏蔽词(路径命中即跳过)
+    media_exts: [".mkv", ".mp4", ".ts", ".iso", ".avi", ".wmv", ".rmvb", ".mov", ".m2ts"]
+    subtitle_exts: [".srt", ".ass", ".ssa", ".sub", ".idx"]
+    audio_exts: [".mka", ".flac", ".aac", ".dts", ".ac3", ".wav", ".eac3"]
+    tmp_exts: [".part", ".download", ".!qb", ".torrent"]   # 下载中/临时后缀
+    delete_empty_source_dirs: true  # move 模式下整理完清理源空目录
 
-directories:                    # 下载目录 → 媒体库映射,按顺序匹配,命中即止
-  - name: "电影下载"
-    download_path: "/data/downloads/movies"
-    library_path: "/data/media"
-    transfer_type: hardlink     # move / copy / hardlink / softlink
-    media_type: movie           # movie / tv / all
-    category: ~                 # 固定类别子目录(如 "华语"),留空不建
-    renaming: true              # false = 保持原文件名直接转移
-    monitor: true               # 参与事件/轮询匹配
-    overwrite_mode: ~           # 留空继承 engine.default_overwrite
-    min_filesize: ~             # 留空继承 engine.min_filesize
-    exclude_words: []           # 目录级屏蔽词,与全局合并
+  directories:                    # 下载目录 → 媒体库映射,按顺序匹配,命中即止
+    - name: "电影下载"
+      download_path: "/data/downloads/movies"
+      library_path: "/data/media"
+      transfer_type: hardlink     # move / copy / hardlink / softlink
+      media_type: movie           # movie / tv / all
+      category: ~                 # 固定类别子目录(如 "华语"),留空不建
+      renaming: true              # false = 保持原文件名直接转移
+      monitor: true               # 参与事件/轮询匹配
+      overwrite_mode: ~           # 留空继承 engine.default_overwrite
+      min_filesize: ~             # 留空继承 engine.min_filesize
+      exclude_words: []           # 目录级屏蔽词,与全局合并
 
-  - name: "剧集下载"
-    download_path: "/data/downloads/tv"
-    library_path: "/data/media"
-    transfer_type: hardlink
-    media_type: tv
-    category: ~                 # 固定类别子目录(如 "华语"),留空不建
-    category_folder: false      # true = 按类别自动建子目录,未识别归"未分类"
-    category_rules: {}          # 可选,MP 格式(如: 纪录片: {genre_ids: "99"});留空用内置 MP 默认规则
-    monitor: true
+    - name: "剧集下载"
+      download_path: "/data/downloads/tv"
+      library_path: "/data/media"
+      transfer_type: hardlink
+      media_type: tv
+      category: ~                 # 固定类别子目录(如 "华语"),留空不建
+      category_folder: false      # true = 按类别自动建子目录,未识别归"未分类"
+      category_rules: {}          # 可选,MP 格式(如: 纪录片: {genre_ids: "99"});留空用内置 MP 默认规则
+      monitor: true
+
+  recognize:
+    tmdb:
+      enabled: false              # 需要 TMDB API key 才启用
+      api_key: ""
+      language: "zh-CN"          # 标题语言(zh-CN 优先中文译名)
+      timeout: 10                 # 秒
+      api_base: "https://api.themoviedb.org/3"  # 默认官方;网络不通可换镜像/自建反代
+      proxy: ""                   # 如 http://192.168.1.1:7890,留空则读系统 HTTPS_PROXY
 
 downloaders:                    # 支持 qbittorrent / transmission
   - name: qb
@@ -113,15 +125,6 @@ reseed:
       ubits: ubits
       zmpt: zmpt
   exclude_paths: []             # 这些目录内的做种不参与辅种(前缀匹配)
-
-recognize:
-  tmdb:
-    enabled: false              # 需要 TMDB API key 才启用
-    api_key: ""
-    language: "zh-CN"          # 标题语言(zh-CN 优先中文译名)
-    timeout: 10                 # 秒
-    api_base: "https://api.themoviedb.org/3"  # 默认官方;网络不通可换镜像/自建反代
-    proxy: ""                   # 如 http://192.168.1.1:7890,留空则读系统 HTTPS_PROXY
 
 history:
   db: "/data/organizer.db"     # SQLite 路径;Docker 部署务必用挂载卷内绝对路径(如 /data/organizer.db),否则重建容器丢历史
