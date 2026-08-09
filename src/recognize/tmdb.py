@@ -72,20 +72,26 @@ class TmdbRecognizer:
         return self.conf.enabled
 
     def recognize(self, meta: ParsedMeta) -> Optional[MediaInfo]:
-        """按解析出的标题+年份识别;命中返回 MediaInfo,否则 None。"""
+        """按解析出的标题+年份识别;命中返回 MediaInfo,否则 None。
+
+        文件名类型(meta.is_tv)只决定搜索优先级:主类型搜不到时回退另一类型,
+        最终以 TMDB 返回结果的实际类型为准(解决无季集标记的剧集被当电影搜的问题)。
+        """
         if not self.enabled or not self._client:
             return None
         if not meta.title:
             return None
-        media_type = "tv" if meta.is_tv else "movie"
-        # 缓存键含语言,避免切换语言后命中旧结果
-        key = f"{media_type}|{self.conf.language}|{meta.title}|{meta.year or ''}"
+        # 缓存键不含类型(结果自带 media_type),避免回退后被旧类型负缓存挡住
+        key = f"{self.conf.language}|{meta.title}|{meta.year or ''}"
 
         cached = self.store.cache_get(key)
         if cached is not None:
             return MediaInfo(**cached) if cached else None
 
-        result = self._search(media_type, meta)
+        primary = "tv" if meta.is_tv else "movie"
+        result = self._search(primary, meta)
+        if result is None:
+            result = self._search("movie" if primary == "tv" else "tv", meta)
         if result:
             self.store.cache_set(key, result.to_dict())
             logger.info(f"TMDB 识别: {meta.title} -> {result.title} ({result.year})"
@@ -124,8 +130,10 @@ class TmdbRecognizer:
 
         results = None
         used_query = None
+        # 标题里已含年份时(如 请回答1988)不传 year 参数,避免 TMDB 按发行年过滤掉
+        year_param = meta.year if not (meta.year and str(meta.year) in title) else ""
         for q in queries:
-            data = self._get(f"/search/{media_type}", query=q, year=meta.year or "", include_adult="false")
+            data = self._get(f"/search/{media_type}", query=q, year=year_param or "", include_adult="false")
             rs = (data or {}).get("results") or []
             if rs:
                 results = rs

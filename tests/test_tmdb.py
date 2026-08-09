@@ -60,8 +60,11 @@ def _recognizer(client, language="zh-CN"):
     conf = TmdbConf(enabled=True, api_key="fake", language=language)
     with tempfile.TemporaryDirectory() as tmp:
         store = HistoryStore(str(Path(tmp) / "t.db"))
-        rec = TmdbRecognizer(conf, store)
-        rec._client = client  # 注入 fake
+        # 绕过 __init__ 的 httpx 构造(宿主旧版 httpx 不支持 proxy kwarg),直接注入 fake client
+        rec = object.__new__(TmdbRecognizer)
+        rec.conf = conf
+        rec.store = store
+        rec._client = client
         return rec, store
 
 
@@ -100,9 +103,68 @@ def test_network_failure_falls_back_none():
 
 def test_cache_key_contains_language():
     rec, store = _recognizer(_FakeClient(_SEARCH_EN, _TRANSLATIONS))
-    meta = ParsedMeta(title="Brush Up Life", year=2023, season=1)  # 带季 → tv
+    meta = ParsedMeta(title="Brush Up Life", year=2023, season=1)  # 带季 → tv 优先
     rec.recognize(meta)
-    assert store.cache_get("tv|zh-CN|Brush Up Life|2023"), "缓存键应含语言"
+    assert store.cache_get("zh-CN|Brush Up Life|2023"), "缓存键应含语言且不含类型前缀"
+    store.close()
+
+
+class _TypeRoutingClient:
+    """按 /search/movie 与 /search/tv 路由,模拟电影搜不到、剧集能搜到。"""
+
+    def __init__(self, movie_results, tv_results):
+        self._movie, self._tv = movie_results, tv_results
+        self.calls = []
+
+    def get(self, url, params=None):
+        self.calls.append((url, params or {}))
+        payload = self._tv if "/search/tv" in url else self._movie
+
+        class _R:
+            def raise_for_status(self): pass
+            def json(self): return {"results": payload}
+        return _R()
+
+    def close(self):
+        pass
+
+
+_TV_DOC = [{
+    "id": 45781, "name": "Planet Earth II", "original_name": "Planet Earth II",
+    "first_air_date": "2016-11-06", "genre_ids": [99], "origin_country": ["GB"],
+}]
+
+
+def test_tv_fallback_when_movie_search_misses():
+    """无季集标记的剧集:movie 搜不到时回退 tv,并以 TMDB 返回类型为准。"""
+    rec, store = _recognizer(_TypeRoutingClient([], _TV_DOC))
+    meta = ParsedMeta(title="Planet Earth II", year=2016)  # 无季 → movie 优先
+    m = rec.recognize(meta)
+    assert m is not None, "回退 tv 应命中"
+    assert m.media_type == "tv", m.media_type
+    assert m.tmdb_id == 45781
+    urls = [u for u, _ in rec._client.calls]
+    assert any("/search/movie" in u for u in urls), "应先查 movie"
+    assert any("/search/tv" in u for u in urls), "应回退查 tv"
+    # 命中后缓存(中性键,含 media_type)
+    cached = store.cache_get("zh-CN|Planet Earth II|2016")
+    assert cached and cached.get("media_type") == "tv"
+    # 二次调用不再请求
+    calls = len(rec._client.calls)
+    rec.recognize(meta)
+    assert len(rec._client.calls) == calls, "应命中缓存"
+    store.close()
+
+
+def test_movie_hit_no_fallback():
+    """movie 首查命中时不触发 tv 回退。"""
+    movie = [{"id": 999, "title": "Some Movie", "original_title": "Some Movie",
+              "release_date": "2020-01-01", "genre_ids": [18]}]
+    rec, store = _recognizer(_TypeRoutingClient(movie, []))
+    m = rec.recognize(ParsedMeta(title="Some Movie", year=2020))
+    assert m is not None and m.media_type == "movie"
+    urls = [u for u, _ in rec._client.calls]
+    assert not any("/search/tv" in u for u in urls), "movie 命中不应回退"
     store.close()
 
 
