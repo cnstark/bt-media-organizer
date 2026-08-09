@@ -2,6 +2,8 @@
 
 要点:
 - X-Transmission-Session-Id 头;409 Conflict 时取响应头新 session-id 重试一次
+- 新老协议双支持:首次调用用老协议 session-get 探测版本,>=4.1 切 JSON-RPC 2.0
+  (snake_case 方法/字段),否则用老协议(kebab-case/camelCase);新协议被拒(400)自动回退老协议
 - torrent-add 用 metainfo=base64(元数据)或 filename=URL
 - 做种状态 status==6;percentDone>=1 视为完成
 - 删除只删种子(delete-local-data=false)
@@ -10,6 +12,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 from pathlib import Path
 from typing import List, Optional, Tuple, Union
 
@@ -26,6 +29,37 @@ _STATUS_TEXT = {
     4: "downloading", 5: "seed-wait", 6: "seeding",
 }
 
+# 老协议方法名(kebab-case)→ 新协议(JSON-RPC 2.0,snake_case)
+_PROTOCOL_METHODS = {
+    "torrent-get": "torrent_get",
+    "torrent-set": "torrent_set",
+    "torrent-add": "torrent_add",
+    "torrent-remove": "torrent_remove",
+    "torrent-verify": "torrent_verify",
+    "session-get": "session_get",
+}
+
+# 老协议(camelCase)→ 新协议(snake_case)字段/参数名映射
+_FIELD_MAP = {
+    "hashString": "hash_string",
+    "downloadDir": "download_dir",
+    "percentDone": "percent_done",
+    "torrentFile": "torrent_file",
+    "totalSize": "total_size",
+}
+_ARG_MAP = {
+    "download-dir": "download_dir",
+    "delete-local-data": "delete_local_data",
+}
+
+
+def _pick(item: dict, *names):
+    """按顺序取第一个存在的键(兼容新老协议字段名)。"""
+    for n in names:
+        if n in item:
+            return item[n]
+    return None
+
 
 class TransmissionAdapter(DownloaderAdapter):
     def __init__(self, conf: DownloaderConf):
@@ -35,6 +69,9 @@ class TransmissionAdapter(DownloaderAdapter):
             base_url=conf.url.rstrip("/"), timeout=30.0, follow_redirects=True
         )
         self._session_id = ""
+        self._probed = False      # 是否已探测协议
+        self._new_api = False     # True=JSON-RPC 2.0(4.1+);False=老协议
+        self._version = ""        # 探测到的服务端版本
 
     # ---------------- 私有 ----------------
 
@@ -44,9 +81,8 @@ class TransmissionAdapter(DownloaderAdapter):
             return (self.conf.username, self.conf.password or "")
         return None
 
-    def _request(self, method: str, args: dict = None) -> dict:
-        """发送 RPC 请求,自动处理 409 会话。失败抛异常,由调用方捕获。"""
-        payload = {"method": method, "arguments": args or {}}
+    def _post(self, payload: dict) -> Tuple[int, dict]:
+        """POST RPC;处理 409 会话重试;返回 (http_code, json)。401 直接抛错。"""
         headers = {"Content-Type": "application/json"}
         if self._session_id:
             headers["X-Transmission-Session-Id"] = self._session_id
@@ -64,13 +100,67 @@ class TransmissionAdapter(DownloaderAdapter):
             )
         if resp.status_code == 401:
             raise RuntimeError("Transmission 认证失败(401)")
-        resp.raise_for_status()
-        data = resp.json()
+        try:
+            data = resp.json()
+        except Exception:  # noqa: BLE001
+            data = {}
+        return resp.status_code, data
+
+    def _ensure_probe(self) -> None:
+        if not self._probed:
+            self._probe()
+
+    def _probe(self) -> None:
+        """老协议 session-get 探测版本;>=4.1 切 JSON-RPC 2.0,新协议冒烟失败回退老协议。"""
+        self._probed = True
+        code, data = self._post({"method": "session-get", "arguments": {"fields": ["version"]}})
+        if code == 200:
+            self._version = str((data.get("arguments") or {}).get("version") or "")
+        m = re.match(r"(\d+)\.(\d+)", self._version)
+        self._new_api = bool(m) and (int(m.group(1)), int(m.group(2))) >= (4, 1)
+        if self._new_api:
+            try:
+                code2, _ = self._post({"jsonrpc": "2.0", "method": "session_get",
+                                       "params": {"fields": ["version"]}, "id": 1})
+                if code2 != 200:
+                    self._new_api = False
+            except Exception:  # noqa: BLE001
+                self._new_api = False  # 新协议冒烟失败,回退老协议
+
+    def _request(self, method: str, args: dict = None) -> dict:
+        """发送 RPC 请求(按探测结果选新老协议),失败抛异常,由调用方捕获。"""
+        self._ensure_probe()
+        args = dict(args or {})
+        is_new = self._new_api
+        if is_new:
+            payload = {
+                "jsonrpc": "2.0",
+                "method": _PROTOCOL_METHODS.get(method, method.replace("-", "_")),
+                "params": {_ARG_MAP.get(k, k): v for k, v in args.items()},
+                "id": 1,
+            }
+        else:
+            payload = {"method": method, "arguments": args}
+        code, data = self._post(payload)
+        if is_new and code == 400:  # 新协议被拒 → 回退老协议重试一次
+            self._new_api = False
+            payload = {"method": method, "arguments": args}
+            code, data = self._post(payload)
+        if code != 200:
+            raise RuntimeError(f"TR RPC HTTP {code}")
+        if is_new:
+            if data.get("error"):
+                err = data["error"]
+                raise RuntimeError(f"TR RPC 失败: {err.get('message') or err}")
+            return data.get("result") or {}
         if data.get("result") != "success":
             raise RuntimeError(f"TR RPC 失败: {data.get('result')}")
         return data.get("arguments") or {}
 
     def _torrent_get(self, fields: List[str], ids: Union[str, int, List, None] = None) -> List[dict]:
+        self._ensure_probe()
+        if self._new_api:
+            fields = [_FIELD_MAP.get(f, f) for f in fields]
         args = {"fields": fields}
         if ids is not None:
             args["ids"] = ids
@@ -78,11 +168,11 @@ class TransmissionAdapter(DownloaderAdapter):
 
     @staticmethod
     def _to_info(item: dict) -> TorrentInfo:
-        status = int(item.get("status") or 0)
-        name = item.get("name") or ""
-        download_dir = item.get("downloadDir") or ""
-        torrent_file = item.get("torrentFile") or ""
-        trackers = item.get("trackers") or []
+        status = int(_pick(item, "status", "status") or 0)
+        name = _pick(item, "name", "name") or ""
+        download_dir = _pick(item, "downloadDir", "download_dir") or ""
+        torrent_file = _pick(item, "torrentFile", "torrent_file") or ""
+        trackers = _pick(item, "trackers", "trackers") or []
         tracker = ""
         for t in trackers:
             announce = t.get("announce") or ""
@@ -90,16 +180,16 @@ class TransmissionAdapter(DownloaderAdapter):
                 tracker = announce
                 break
         return TorrentInfo(
-            hash=(item.get("hashString") or "").lower(),
+            hash=(_pick(item, "hashString", "hash_string") or "").lower(),
             name=name,
             save_path=Path(download_dir),
             content_path=(Path(download_dir) / name) if download_dir and name else Path(download_dir),
-            tags=list(item.get("labels") or []),
-            size=int(item.get("totalSize") or 0),
+            tags=list(_pick(item, "labels", "labels") or []),
+            size=int(_pick(item, "totalSize", "total_size") or 0),
             state=_STATUS_TEXT.get(status, str(status)),
             tracker=tracker,
             torrent_file=torrent_file,
-            done=float(item.get("percentDone") or 0.0) >= 1.0,
+            done=float(_pick(item, "percentDone", "percent_done") or 0.0) >= 1.0,
             seeding=status == 6,
         )
 
@@ -124,7 +214,7 @@ class TransmissionAdapter(DownloaderAdapter):
         items = self._torrent_get(["hashString", "torrentFile"], ids=[hash])
         if not items:
             return None
-        path = items[0].get("torrentFile") or ""
+        path = _pick(items[0], "torrentFile", "torrent_file") or ""
         if not path:
             return None
         try:
@@ -202,7 +292,8 @@ class TransmissionAdapter(DownloaderAdapter):
 
     def app_version(self) -> str:
         try:
-            return str(self._request("session-get", {"fields": ["version"]}).get("version") or "")
+            self._ensure_probe()
+            return self._version
         except Exception as e:  # noqa: BLE001
             logger.error(f"[{self.name}] session-get 失败: {e}")
             return ""
