@@ -33,8 +33,8 @@ _SOURCE_RE = re.compile(
 )
 # Part/CD/Disc
 _PART_RE = re.compile(r"(?:^|[.\s_-])(part|pt|cd|disc|disk)[.\s_-]?(\d{1,2})(?:$|[.\s_-])", re.I)
-# 资源组:末尾 -XXX(至少 3 字符,排除纯年份与 Part/CD 类、WEB-DL 等来源后缀)
-_GROUP_RE = re.compile(r"-(?!\d{4}$)([A-Za-z0-9]{3,})$")
+# 资源组:末尾 -XXX(至少 3 字符,排除纯年份与 Part/CD 类、WEB-DL 等来源后缀;允许 @/&/+ 如 Thor@HDSky)
+_GROUP_RE = re.compile(r"-(?!\d{4}$)([A-Za-z0-9@&+]{3,})$")
 # 不可能是资源组的来源类后缀
 _NON_GROUP_SUFFIX = {"dl", "web", "rip", "hdtv", "remux"}
 # Part/CD/Disc 类后缀(用于排除在资源组之外)
@@ -42,7 +42,9 @@ _PART_LIKE_RE = re.compile(r"(?i)(part|pt|cd|disc|disk)\d*$")
 # 末尾 Part/CD/Disc:如 x264-PART1 / Movie.CD1 / Movie.Disc 1
 _PART_TAIL_RE = re.compile(r"[.\s_-]((?:part|pt|cd|disc|disk)[.\s_-]?)(\d{1,2})$", re.I)
 # 噪声词(版本/画质说明,不进入标题)
-_NOISE_RE = re.compile(r"\b(dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi|hlg)\b|\b\d{2,3}fps\b", re.I)
+_NOISE_RE = re.compile(r"\b(imax|dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi|hlg)\b|\b\d{2,3}fps\b", re.I)
+# 地区/发行区标签(全大写时才丢弃,避免误伤 "Us"(2019) 这类片名)
+_REGION_RE = re.compile(r"\b(usa|uk|gbr|jpn|kor|chn|hkg|twn|fra|deu|ita|esp|rus|aus|can|eur)\b", re.I)
 # 季/集单词(单独成 token 时丢弃)
 _SE_EXTRA_WORDS = {"season", "ep", "episode", "episodes", "e", "s", "集", "季", "话"}
 # 内嵌 tmdbid 等媒体 ID:{tmdbid=12345} / {mediaid=123}
@@ -299,6 +301,9 @@ def parse_filename(name: str) -> ParsedMeta:
             continue
         # 噪声词/季集单词丢弃
         if low in _SE_EXTRA_WORDS or _NOISE_RE.fullmatch(token):
+            continue
+        # 地区标签:全大写才丢弃(如 USA/JPN;保留 "Us" 这类片名)
+        if token.isupper() and _REGION_RE.fullmatch(token):
             continue
         # 数字:单数字(声道 7.1 等)或等于检测年份的丢弃;其余保留(如片名 2001/1917/300)
         if token.isdigit():

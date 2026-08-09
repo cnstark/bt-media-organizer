@@ -121,6 +121,30 @@ def test_cn_numeral_season_episode():
     assert m2.begin_episode == 21
 
 
+def test_at_group_imax_region_cleaned():
+    # 蓝光原盘镜像:发布组带 @,IMAX/USA 地区标签不进入标题
+    m = parse_filename("Project Hail Mary 2026 IMAX 2160p USA UHD Blu-ray DoVi HDR10 HEVC TrueHD 7.1-Thor@HDSky.iso")
+    assert m.title == "Project Hail Mary", m.title
+    assert m.year == 2026
+    assert m.group == "Thor@HDSky", m.group
+    assert m.source == "BluRay"
+    assert m.video_codec == "hevc"
+    assert "IMAX" not in m.title and "USA" not in m.title and "Thor" not in m.title
+
+
+def test_us_movie_preserved():
+    # 区分大小写:片名 "Us"(2019)不能被地区标签规则误删
+    m = parse_filename("Us.2019.1080p.BluRay.x264-SPARKS.mkv")
+    assert m.title == "Us", m.title
+    assert m.group == "SPARKS"
+
+
+def test_imax_dropped_in_title():
+    m = parse_filename("Dunkirk.2017.IMAX.1080p.BluRay.x264-GROUP.mkv")
+    assert m.title == "Dunkirk", m.title
+    assert "IMAX" not in m.title
+
+
 def test_channel_prefix_noise_cleaned():
     m = parse_filename("[中央广播电视总台4K超高清频道 舌尖上的中国 第四季].CCTV-4K.A.Bite.of.China.2025.S04.2160p.50fps.UHDTV.HEVC.10bit.HLG.DD5.1-QHstudIo.ts")
     assert m.season == 4
