@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 
 from ..config import Config, TransferDirConf
-from ..downloaders import DownloaderAdapter, QBittorrentAdapter, TorrentInfo
+from ..downloaders import DownloaderAdapter, QBittorrentAdapter, TorrentInfo, TransmissionAdapter
 from ..history import HistoryStore
 from ..parse.filename import parse_filename, subtitle_lang_tag
 from ..recognize.category import DEFAULT_MOVIE_RULES, DEFAULT_TV_RULES, match_category, parse_rules
@@ -53,6 +53,8 @@ class TransferEngine:
         for dl in conf.downloaders:
             if dl.type == "qbittorrent":
                 self.downloaders[dl.name] = QBittorrentAdapter(dl)
+            elif dl.type == "transmission":
+                self.downloaders[dl.name] = TransmissionAdapter(dl)
 
     # ------------------------------------------------------------ 工具
 
