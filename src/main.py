@@ -3,8 +3,9 @@
 用法:
     python -m src.main --config /path/to/config.yaml
 环境变量:
-    PTPILOT_CONFIG  配置文件路径(默认 ./config.yaml)
-    PTPILOT_TOKEN   覆盖 server.token
+    PTPILOT_CONFIG            配置文件路径(默认 ./config.yaml)
+    PTPILOT_TOKEN             覆盖 server.token
+    PTPILOT_WATCH_INTERVAL    配置热重载监听间隔秒数(默认 3,0=关闭监听)
 """
 from __future__ import annotations
 
@@ -18,9 +19,9 @@ import time
 from .api import ApiServer
 from .config import load_config
 from .downloaders import create_adapter
-from .engine import TransferEngine as OrganizeEngine
 from .history import HistoryStore
 from .log import setup_logger
+from .reload import ConfigManager
 from .reseed.engine import ReseedEngine
 from .reseed.matcher import JackettMatcher
 from .reseed.store import ReseedStore
@@ -62,29 +63,6 @@ def _apply_uid_gid() -> None:
         logger.warning(f"PUID/PGID 切换失败,继续以当前用户运行: {e}")
 
 
-def _poll_loop(engine: OrganizeEngine, downloader: str, interval: int, stop: threading.Event):
-    """下载器轮询线程:对账「已完成未打标签」的任务。"""
-    logger.info(f"轮询线程已启动: {downloader} 每 {interval}s")
-    while not stop.is_set():
-        try:
-            engine.poll_once(downloader=downloader)
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"轮询异常[{downloader}]: {e}")
-        stop.wait(interval)
-
-
-def _run_once_loop(engine, interval: int, stop: threading.Event):
-    """通用轮询循环(转移/辅种引擎共用):周期调 run_once。"""
-    name = getattr(engine, "name", type(engine).__name__)
-    logger.info(f"轮询线程已启动: {name} 每 {interval}s")
-    while not stop.is_set():
-        try:
-            engine.run_once()
-        except Exception as e:  # noqa: BLE001
-            logger.error(f"轮询异常[{name}]: {e}")
-        stop.wait(interval)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="ptpilot 轻量媒体整理服务")
     parser.add_argument("--config", default=os.getenv("PTPILOT_CONFIG", "config.yaml"),
@@ -107,6 +85,7 @@ def main() -> None:
     purged = store.purge()
     if purged:
         logger.info(f"已清理过期历史 {purged} 条")
+    from .engine import TransferEngine as OrganizeEngine
     engine = OrganizeEngine(conf, store)
 
     # 下载器适配器(按名索引,转移/辅种共用)
@@ -130,6 +109,7 @@ def main() -> None:
 
     # 辅种引擎
     reseed_engine = None
+    reseed_store = None
     if conf.reseed.enabled:
         if conf.reseed.target_client not in adapters:
             logger.error("reseed 模块启用但目标下载器适配器创建失败,辅种功能不可用")
@@ -141,41 +121,41 @@ def main() -> None:
             )
             logger.info(f"辅种引擎已初始化: 注入目标={conf.reseed.target_client}")
 
-    # 轮询线程
+    # 配置热重载管理器(轮询线程统一由它管理,支持文件监听 + 手动触发)
     stop_event = threading.Event()
-    pollers = []
-    for dl in conf.downloaders:
-        if dl.poll_interval > 0:
-            t = threading.Thread(target=_poll_loop,
-                                 args=(engine, dl.name, dl.poll_interval, stop_event),
-                                 name=f"poll-{dl.name}", daemon=True)
-            t.start()
-            pollers.append(t)
-
-    # 转移轮询线程
-    if transfer_engine and conf.transfer.poll_interval > 0:
-        t = threading.Thread(target=_run_once_loop,
-                             args=(transfer_engine, conf.transfer.poll_interval, stop_event),
-                             name="transfer-poll", daemon=True)
-        t.start()
-
-    # 辅种轮询线程
-    if reseed_engine and conf.reseed.poll_interval > 0:
-        t = threading.Thread(target=_run_once_loop,
-                             args=(reseed_engine, conf.reseed.poll_interval, stop_event),
-                             name="reseed-poll", daemon=True)
-        t.start()
+    try:
+        watch_interval = float(os.getenv("PTPILOT_WATCH_INTERVAL", "3"))
+    except ValueError:
+        watch_interval = 3.0
+    runtime = {
+        "conf": conf,
+        "store": store,
+        "engine": engine,
+        "adapters": adapters,
+        "transfer_engine": transfer_engine,
+        "reseed_engine": reseed_engine,
+        "reseed_store": reseed_store,
+        "server": None,
+        "pollers": {"organize": {}, "transfer": None, "reseed": None},
+    }
+    reload_manager = ConfigManager(args.config, runtime, watch_interval=watch_interval)
 
     # HTTP 服务
     server = ApiServer(conf, engine, transfer_engine=transfer_engine,
-                       reseed_engine=reseed_engine)
+                       reseed_engine=reseed_engine, reload_manager=reload_manager)
+    runtime["server"] = server
     server_thread = threading.Thread(target=server.serve_forever,
                                      name="http", daemon=True)
     server_thread.start()
 
+    # 启动全部轮询线程 + 配置监听
+    reload_manager.sync_pollers(conf, runtime)
+    reload_manager.start_watch()
+
     def _shutdown(signum, frame):  # noqa: ARG001
         logger.info(f"收到信号 {signum},正在退出 ...")
         stop_event.set()
+        reload_manager.stop_all()
         server.shutdown()
         engine.close()
         store.close()

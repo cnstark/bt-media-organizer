@@ -22,6 +22,7 @@
   → 发布组匹配完立即注入;SQLite 记录管理(查看/删除/重试)
 - ✅ SQLite 历史记录 + 幂等去重 + 失败自动重试(下轮轮询)
 - ✅ 常驻服务 + Docker,HTTP API 无 Web UI(三模块状态/手动触发/记录管理)
+- ✅ 配置热重载:监听 config.yaml 变更自动生效,也可 API 手动触发,无需重启
 
 ## 快速开始
 
@@ -30,6 +31,7 @@ cp config.example.yaml config.yaml   # 修改配置(详见下文「配置文件�
 pip install -r requirements.txt
 python -m src.main --config config.yaml
 # 环境变量: PTPILOT_CONFIG(配置路径) / PTPILOT_TOKEN(覆盖 server.token)
+#           PTPILOT_WATCH_INTERVAL(配置热重载监听间隔秒数,默认 3;0=关闭监听)
 ```
 
 或 Docker(部署版,参考 docker-compose.example.yml):
@@ -230,11 +232,30 @@ log:
 | POST | `/api/v1/history/{id}/files/delete` | 删除该记录整理出的文件,body `{delete_source?, delete_history?}` |
 | GET | `/api/v1/queue` | 整理运行状态 |
 | GET | `/api/v1/status` | 三模块状态(开关/最近运行/统计/辅种记录计数) |
+| GET | `/api/v1/config/status` | 配置热重载状态(路径/监听开关/最近重载结果) |
+| POST | `/api/v1/config/reload` | 手动触发热重载(重新加载 config.yaml 并应用;失败保留旧配置) |
 | POST | `/api/v1/transfer/run` | 手动触发一次转移扫描 |
 | POST | `/api/v1/reseed/run` | 手动触发一次辅种匹配+执行 |
 | GET | `/api/v1/reseed/records?status=&limit=&offset=` | 辅种记录查询(pending/success/failed/skipped) |
 | DELETE | `/api/v1/reseed/records/{id}` | 删除辅种记录(删除后可重新匹配) |
 | POST | `/api/v1/reseed/records/{id}/redo` | 失败/跳过记录立即重试 |
+
+## 配置热重载
+
+服务默认监听 `config.yaml`(间隔 `PTPILOT_WATCH_INTERVAL` 秒,默认 3;设 0 关闭),
+检测到变更即重新加载并应用到运行组件;也可随时 `POST /api/v1/config/reload` 手动触发。
+
+生效范围(无需重启):
+
+- `organize` 全部(引擎参数/目录映射/命名模板/识别 TMDB 配置);
+- `downloaders` 增删与凭据/路径变化(适配器重建,旧连接释放);
+- `transfer` / `reseed` 开关、参数、`jackett` 白名单与 `tracker_map`(matcher 重建);
+- `server.token`(下一请求生效)、`log.level`、`history` 存储路径;
+- 轮询间隔(poll_interval)原地调整,线程不重启。
+
+校验失败(语法/缺项)或应用异常时**保留旧配置**,错误记录在 `config/status` 的 `last_error`。
+
+**需要重启进程**:`server.host/port`(监听端口启动时绑定)。
 
 ## 运维要点
 
@@ -245,7 +266,7 @@ log:
   整理历史与辅种记录。
 - **重建容器**:部署版 `docker compose pull && docker compose up -d` 拉取最新镜像;
   本地调试 `./scripts/debug.sh`(先 build 再 up)。config.yaml 为 bind 挂载,
-  配置改动只需重启,代码改动需先打 tag 发布新镜像再 pull(或本地 debug.sh)。
+  配置改动热重载生效(除 host/port);代码改动需先打 tag 发布新镜像再 pull(或本地 debug.sh)。
 - **日志**:转移/辅种均有完整过程日志(发布组进度、搜索条数、命中/跳过原因、注入结果);
   辅种失败记录可查 `reseed_records`。
 
@@ -253,8 +274,9 @@ log:
 
 ```
 src/
-├── main.py                  # 入口:三模块轮询线程 + HTTP 服务
+├── main.py                  # 入口:轮询线程 + HTTP 服务 + 热重载管理
 ├── config.py                # YAML 配置加载与校验
+├── reload.py                # 配置热重载(文件监听/手动触发/组件重建)
 ├── api/server.py            # HTTP API(标准库)
 ├── engine/                  # 整理引擎(organizer/namer/executor/planner)
 ├── downloaders/             # 下载器抽象(qB/TR 适配器 + bencode 工具)
@@ -266,7 +288,7 @@ tests/                       # 单元测试(pytest/unittest)
 ## 测试
 
 ```bash
-.venv/bin/python -m pytest tests/ -q    # 122 个测试
+.venv/bin/python -m pytest tests/ -q    # 140 个测试
 ```
 
 ## 文档

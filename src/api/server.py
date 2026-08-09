@@ -38,6 +38,7 @@ class _Handler(BaseHTTPRequestHandler):
     engine: TransferEngine = None
     transfer_engine = None          # Optional[TransferEngine]
     reseed_engine = None            # Optional[ReseedEngine]
+    reload_manager = None           # Optional[ConfigManager](热重载)
     token: str = ""
 
     # ---------------- 基础 ----------------
@@ -89,6 +90,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(200, _json({"code": 0, "data": self.engine.status()}))
         elif path == "/api/v1/status":
             self._status()
+        elif path == "/api/v1/config/status":
+            self._config_status()
         elif path == "/api/v1/reseed/records":
             self._reseed_records()
         else:
@@ -106,6 +109,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._download(body)
         elif path == "/api/v1/poll":
             self._poll(body)
+        elif path == "/api/v1/config/reload":
+            self._config_reload()
         elif path == "/api/v1/transfer/run":
             self._transfer_run()
         elif path == "/api/v1/reseed/run":
@@ -132,6 +137,26 @@ class _Handler(BaseHTTPRequestHandler):
             self._reseed_record_delete(int(m.group(1)))
         else:
             self._send(404, _json({"code": 404, "message": "not found"}))
+
+    # ---------------- 配置热重载 ----------------
+
+    def _config_status(self) -> None:
+        """热重载状态:配置路径 / 监听开关 / 最近一次重载结果。"""
+        if not _Handler.reload_manager:
+            self._send(200, _json({"code": 1, "message": "配置热重载未启用"}))
+            return
+        self._send(200, _json({"code": 0, "data": _Handler.reload_manager.status()}))
+
+    def _config_reload(self) -> None:
+        """手动触发热重载:重新加载配置并应用到运行组件;失败保留旧配置。"""
+        if not _Handler.reload_manager:
+            self._send(200, _json({"code": 1, "message": "配置热重载未启用"}))
+            return
+        result = _Handler.reload_manager.reload()
+        self._send(200, _json({"code": result.get("code", 1),
+                               "message": result.get("message", ""),
+                               "data": {"reloaded": result.get("reloaded", False),
+                                        "changed": result.get("changed", [])}}))
 
     # ---------------- 业务 ----------------
 
@@ -410,10 +435,11 @@ class ApiServer:
     """HTTP 服务封装。"""
 
     def __init__(self, conf: Config, engine: TransferEngine, transfer_engine=None,
-                 reseed_engine=None):
+                 reseed_engine=None, reload_manager=None):
         _Handler.engine = engine
         _Handler.transfer_engine = transfer_engine
         _Handler.reseed_engine = reseed_engine
+        _Handler.reload_manager = reload_manager
         _Handler.token = conf.server.token
         self._httpd = ThreadingHTTPServer((conf.server.host, conf.server.port), _Handler)
         logger.info(f"HTTP 服务已启动: http://{conf.server.host}:{conf.server.port}")
