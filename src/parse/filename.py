@@ -8,8 +8,8 @@ from typing import List, Optional
 
 # ---------------------------------------------------------------- 正则
 
-# 年份:独立成词,如 (2026) / .2026. / 2026
-_YEAR_RE = re.compile(r"(?:^|[.\[(\s-])(19\d{2}|20\d{2})(?:$|[.\])\s-])")
+# 年份:独立成词,如 (2026) / .2026. / 2026(尾部分隔符用前瞻,避免相邻年份只匹配第一个)
+_YEAR_RE = re.compile(r"(?:^|[.\[(\s-])(19\d{2}|20\d{2})(?=$|[.\])\s-])")
 # 季:Season 1 / S01 / 第2季(英文 S 后必须是数字边界,避免 S01E02 里重复匹配)
 _SEASON_RE = re.compile(r"[Ss]eason[\s._-]*(\d{1,2})|(?:^|[.\s_-])S(\d{1,2})(?!\d)|第\s*(\d{1,3})\s*季|第\s*([零一二两三四五六七八九十百]+)\s*季")
 # 集:S01E02 / S01E02-E03 / E02 / EP02 / 第2集
@@ -22,10 +22,10 @@ _EPISODE_RE = re.compile(
 # 分辨率
 _RES_RE = re.compile(r"\b(2160p|1080p|720p|480p|4k|uhd)\b", re.I)
 # 视频编码
-_VIDEO_RE = re.compile(r"\b(x264|h264|avc|hevc|x265|h265|mpeg4|mpeg2|vc-?1)\b", re.I)
-# 音频编码
+_VIDEO_RE = re.compile(r"\b(x264|h264|avc|hevc|x265|h265|mpeg4|mpeg2|vc-?1|264)\b", re.I)
+# 音频编码(含粘连形式:TrueHD7.1 拆开剩 TrueHD7 / DDP5 / 2Audio / DTS-X 等)
 _AUDIO_RE = re.compile(
-    r"\b(truehd|atmos|dts-?hd(?:ma)?|dts|ac3|eac3|aac|flac|pcm|lpcm|dd5|ddp5\.1|dd5\.1|5\.1|7\.1)\b", re.I
+    r"\b(truehd\d*|atmos|atoms|dts-?hd(?:ma)?|dts[-_.]?x?|ac3|eac3|aac|flac|pcm|lpcm|ddp\d(?:\.\d)?|dd5(?:\.\d)?|dd2(?:\.\d)?|dts5|\d+audios?|5\.1|7\.1)\b", re.I
 )
 # 来源
 _SOURCE_RE = re.compile(
@@ -41,12 +41,20 @@ _NON_GROUP_SUFFIX = {"dl", "web", "rip", "hdtv", "remux"}
 _PART_LIKE_RE = re.compile(r"(?i)(part|pt|cd|disc|disk)\d*$")
 # 末尾 Part/CD/Disc:如 x264-PART1 / Movie.CD1 / Movie.Disc 1
 _PART_TAIL_RE = re.compile(r"[.\s_-]((?:part|pt|cd|disc|disk)[.\s_-]?)(\d{1,2})$", re.I)
-# 噪声词(版本/画质说明,不进入标题)
-_NOISE_RE = re.compile(r"\b(imax|dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi|hlg)\b|\b\d{2,3}fps\b", re.I)
+# 噪声词(版本/画质/平台标记,不进入标题)
+_NOISE_RE = re.compile(r"\b(imax|dv|hdr10\+?|hdr|sdr|dolby\s?vision|10bit|8bit|dovi|hlg|extended|theatrical|itunes|vivid|complete|edr|b-global|nf|hami|hfr|hq|dsnp)\b|\b\d{2,3}fps\b", re.I)
 # 地区/发行区标签(全大写时才丢弃,避免误伤 "Us"(2019) 这类片名)
-_REGION_RE = re.compile(r"\b(usa|uk|gbr|jpn|kor|chn|hkg|twn|fra|deu|ita|esp|rus|aus|can|eur)\b", re.I)
+_REGION_RE = re.compile(r"\b(usa|uk|gbr|jpn|kor|chn|hkg|twn|fra|deu|ita|esp|rus|aus|can|eur|ger|nor|swe|den|fin|pol|cze|nld|bel|prt|hun|ukr)\b", re.I)
+# 合集/套装标记(去重后按第一部搜索):8-Film / Collection / Trilogy / 2001-2011
+_COLLECTION_RE = re.compile(r"^\d+[- ]?film$|^collection$|^trilogy$|^\d{4}-\d{4}$", re.I)
+# 中文版本/音轨噪声词
+_CN_NOISE_WORDS = {"最终剪辑版", "最终剪辑", "国英双语", "中英字幕", "双语", "白星版", "精校版", "完整版", "剧场版", "加长版", "导演剪辑版", "修复版", "高清"}
+# 中文版本后缀(粘连在片名后,如 泰坦尼克号白星版 -> 泰坦尼克号)
+_CN_VERSION_SUFFIX_RE = re.compile(r"(最终剪辑版|白星版|精校版|完整版|剧场版|加长版|导演剪辑版|修复版|特别版|重制版)$")
+# 全集标记:全12季 / 全1季
+_CN_FULL_SEASON_RE = re.compile(r"^全\d+季$")
 # 季/集单词(单独成 token 时丢弃)
-_SE_EXTRA_WORDS = {"season", "ep", "episode", "episodes", "e", "s", "集", "季", "话"}
+_SE_EXTRA_WORDS = {"season", "ep", "episode", "episodes", "e", "s", "集", "季", "话", "cut", "director's"}
 # 内嵌 tmdbid 等媒体 ID:{tmdbid=12345} / {mediaid=123}
 _MEDIAID_RE = re.compile(r"\{[a-zA-Z]+=\d+\}")
 # 括号处理(对齐 MoviePilot metavideo.py):
@@ -56,8 +64,10 @@ _FIRST_BRACKET_RE = re.compile(r"^[\[【](.+?)[\]】]")
 _BRACKET_DOT_TITLE_RE = re.compile(r"[A-Za-z]+\..+(?:19|20)\d{2}")
 _BRACKET_RESOURCE_RE = re.compile(r"(?:2160|1080|720|480)[PIpi]|4K|UHD|Blu[\-. ]?ray|REMUX|WEB[\-. ]?DL|HDTV")
 
-# 分隔符(把 . _ 空格 [] () 全部归一为空格)
-_SPLIT_RE = re.compile(r"[._\s\[\](){}]+")
+# 中文发布组分隔符:中英字幕￡CMCT风潇潇 -> 去掉 ￡CMCT风潇潇(组名不进标题)
+_CN_GROUP_SEP_RE = re.compile(r"￡[^._\s]+$")
+# 分隔符(把 . _ 空格 [] () 全部归一为空格;含全角括号)
+_SPLIT_RE = re.compile(r"[._\s\[\](){}（）]+")
 
 # ---------------------------------------------------------------- 语言标记(字幕)
 
@@ -239,6 +249,9 @@ def parse_filename(name: str) -> ParsedMeta:
         else:
             stem = stem[bracket.end():]
 
+    # 中文发布组(￡ 分隔,如 中英字幕￡CMCT风潇潇):剥掉尾部组名
+    stem = _CN_GROUP_SEP_RE.sub("", stem)
+
     # 先提取末尾资源组/Part(避免与后续 token 分类粘连,如 x264-GROUP)
     gm = _GROUP_RE.search(stem)
     if gm and not _PART_LIKE_RE.match(gm.group(1)) \
@@ -263,7 +276,8 @@ def parse_filename(name: str) -> ParsedMeta:
     # 逐 token 分类
     tokens = [t for t in _SPLIT_RE.split(stem) if t]
     title_tokens: List[str] = []
-    for token in tokens:
+    last_title_idx: Optional[int] = None  # 最近一个进入标题的 token 下标(用于单数字判别)
+    for idx, token in enumerate(tokens):
         low = token.lower()
         if _RES_RE.fullmatch(token):
             meta.resolution = "2160p" if low in ("4k", "uhd") else low
@@ -305,11 +319,38 @@ def parse_filename(name: str) -> ParsedMeta:
         # 地区标签:全大写才丢弃(如 USA/JPN;保留 "Us" 这类片名)
         if token.isupper() and _REGION_RE.fullmatch(token):
             continue
-        # 数字:单数字(声道 7.1 等)或等于检测年份的丢弃;其余保留(如片名 2001/1917/300)
+        # 合集/套装标记(8-Film/Collection/Trilogy/年份区间)
+        if _COLLECTION_RE.fullmatch(token):
+            continue
+        # 中文版本/音轨噪声词、全集标记(全12季)
+        if token in _CN_NOISE_WORDS or _CN_FULL_SEASON_RE.fullmatch(token):
+            continue
+        # 中文版本后缀粘连(泰坦尼克号白星版 -> 泰坦尼克号)
+        if _CN_VERSION_SUFFIX_RE.search(token):
+            token = _CN_VERSION_SUFFIX_RE.sub("", token)
+            if not token:
+                continue
+        # DTS-HD MA 残留的 MA、iQIYI 的 IQ(均需全大写且非标题首位,保护片名 "Ma"/"I.Q.")
+        if token.isupper() and low in ("ma", "iq") and idx > 0:
+            continue
+        # H.264/H.265 拆出的独立 H(仅当后接 264/265 时)
+        if low == "h" and idx + 1 < len(tokens) and tokens[idx + 1].lower() in ("264", "265"):
+            continue
+        # 数字:单数字仅紧跟标题词时保留(如 Expendables 3),否则视为声道/序号丢弃;
+        # 等于检测年份的丢弃;标题中段的其他 4 位年份丢弃(如 Blade Runner 2049 2017 的 2017,
+        # 但开头年份如 2001 A Space Odyssey / 1917 保留为片名)
         if token.isdigit():
-            if len(token) == 1 or (meta.year is not None and int(token) == meta.year):
+            if len(token) == 1:
+                if last_title_idx is not None and idx == last_title_idx + 1:
+                    title_tokens.append(token)
+                    last_title_idx = idx
+                continue
+            if meta.year is not None and int(token) == meta.year:
+                continue
+            if len(token) == 4 and 1900 <= int(token) <= 2099 and idx > 0:
                 continue
         title_tokens.append(token)
+        last_title_idx = idx
 
     meta.title = " ".join(title_tokens).strip() if title_tokens else stem
     meta.tokens = title_tokens

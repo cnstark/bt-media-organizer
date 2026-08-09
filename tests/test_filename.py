@@ -145,6 +145,80 @@ def test_imax_dropped_in_title():
     assert "IMAX" not in m.title
 
 
+def test_audio_glue_and_version_tags():
+    # TrueHD7.1 拆开后的 TrueHD7 / 2Audio / DTS-X / MA / Complete / EDR / IQ / DDP2 等不进入标题
+    m = parse_filename("Thor.Ragnarok.2017.UHD.BluRay.REMUX.2160p.HEVC.Atmos.TrueHD7.1.2Audio-CHD.mkv")
+    assert m.title == "Thor Ragnarok", m.title
+    assert m.group == "CHD"
+    m2 = parse_filename("Black.Widow.2021.2160p.BluRay.REMUX.HEVC.DTS-HD.MA.TrueHD.7.1.Atmos-FGT.mkv")
+    assert m2.title == "Black Widow", m2.title
+    m3 = parse_filename("[我的阿勒泰].To.the.Wonder.2024.S01.Complete.2160p.WEB-DL.EDR.H265.DDP5.1.Atmos-UBWEB.mkv")
+    assert m3.title == "To the Wonder", m3.title
+    m4 = parse_filename("Meet.Yourself.S01.2023.2160p.IQ.WEB-DL.H265.DDP2.0-HHWEB.mkv")
+    assert m4.title == "Meet Yourself", m4.title
+    assert "MA" not in m2.title and "IQ" not in m4.title and "Complete" not in m3.title
+
+
+def test_collection_pack_stripped():
+    m = parse_filename("Harry.Potter.8-Film.Collection.2001-2011.UHD.BluRay.2160p.DTS-X.7.1.HDR.x265.10bit.mkv")
+    assert m.title == "Harry Potter", m.title
+    assert m.year == 2011  # 最后一个年份(与 _find_year 取末尾语义一致)
+    assert "Collection" not in m.title and "2001-2011" not in m.title
+
+
+def test_sequel_number_kept():
+    # 序号紧跟标题词时保留(Expendables 3),声道数字仍丢弃(TrueHD 7.1)
+    m = parse_filename("The.Expendables.3.2014.Theatrical.Cut.BluRay.2160p.UHD.REMUX.HEVC.TrueHD.7.1-UBi.mkv")
+    assert m.title == "The Expendables 3", m.title
+    m2 = parse_filename("Movie.2020.1080p.TrueHD.7.1.mkv")
+    assert m2.title == "Movie", m2.title
+    assert "7" not in m2.title and "1" not in m2.title
+
+
+def test_cn_version_suffix_stripped():
+    m = parse_filename("泰坦尼克号白星版.Titanic.1997.Extended.Fan.Cut.1080p.BluRay.DTS.x264-QNY.mkv")
+    assert "白星版" not in m.title
+    m2 = parse_filename("银翼杀手(最终剪辑版).1982.1080p.国英双语.中英字幕￡CMCT风潇潇.mkv")
+    assert m2.title == "银翼杀手", m2.title
+    assert "最终剪辑版" not in m2.title and "国英双语" not in m2.title
+
+
+def test_ma_iq_case_sensitive():
+    # 全大写 MA/IQ 非标题首位才丢弃;片名 Ma(2019) 与 I.Q.(1994) 保留
+    m = parse_filename("Ma.2019.1080p.BluRay.x264-SPARKS.mkv")
+    assert m.title == "Ma", m.title
+    m2 = parse_filename("I.Q.1994.1080p.BluRay.x264-GROUP.mkv")
+    assert "I" in m2.title and "Q" in m2.title
+
+
+def test_dual_year_mid_title_dropped():
+    # Blade Runner 2049 2017:检测年份取最后一个(2017),中段 2049 丢弃,标题剩 Blade Runner
+    m = parse_filename("Blade.Runner.2049.2017.UHD.BluRay.REMUX.2160p.HEVC.Atmos.TrueHD7.1.2Audio-CHD.mkv")
+    assert m.title == "Blade Runner", m.title
+    assert m.year == 2017
+
+
+def test_title_year_at_start_kept():
+    # 开头年份是片名(2001/1917),不能丢
+    m = parse_filename("2001.A.Space.Odyssey.1968.1080p.BluRay.x264.mkv")
+    assert m.title == "2001 A Space Odyssey", m.title
+    assert m.year == 1968
+    m2 = parse_filename("1917.2019.1080p.BluRay.x264-GROUP.mkv")
+    assert m2.title == "1917", m2.title
+    assert m2.year == 2019
+
+
+def test_h264_split_h_dropped():
+    m = parse_filename("Till.We.Meet.Again.2021.1080p.DSNP.WEB-DL.DDP5.1.H.264-CTRLWEB.mkv")
+    assert m.title == "Till We Meet Again", m.title
+    assert "H" not in m.title and "DSNP" not in m.title
+
+def test_cn_full_season_marker():
+    m = parse_filename("生活大爆炸.全12季.The.Big.Bang.Theory.Complete.1080p.Blu-Ray.AC3.x265.10bit-Yumi.mkv")
+    assert "全12季" not in m.title
+    assert "生活大爆炸" in m.title and "The Big Bang Theory" in m.title
+
+
 def test_channel_prefix_noise_cleaned():
     m = parse_filename("[中央广播电视总台4K超高清频道 舌尖上的中国 第四季].CCTV-4K.A.Bite.of.China.2025.S04.2160p.50fps.UHDTV.HEVC.10bit.HLG.DD5.1-QHstudIo.ts")
     assert m.season == 4
